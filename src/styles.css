@@ -1,0 +1,801 @@
+/* Admin panel — design tokens and base styles.
+ *
+ * Table 4.1 sets the brief: "Dense and log-heavy: organisation approval
+ * queues, impersonation with mandatory audit, feature flags." Keyboard
+ * efficiency is prioritised over visual richness, which here means small type,
+ * tight rows, real tables, and no decoration that costs a line of height.
+ *
+ * WCAG 2.2 Level AA is a mandatory acceptance criterion for every portal, not
+ * only the student-facing ones (section 7.1). The rules that follow from that
+ * are marked where they appear, because they are the ones most likely to be
+ * "tidied away" by someone who does not know why they are there.
+ */
+
+/* --- tokens ---------------------------------------------------------------- */
+
+:root {
+  color-scheme: light dark;
+
+  /* Neutrals. Contrast against --surface is stated for each, because the 4.5:1
+   * floor for body text is a requirement rather than a preference. */
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-sunken: #f0f2f5;
+  --border: #d5d9e0;
+  /* 3.09:1 against --surface — the 1.4.11 floor for a control boundary. */
+  --border-strong: #8e8c95;
+
+  --text: #16191f;          /* 16.1:1 */
+  --text-muted: #5a6472;    /*  6.0:1 */
+  /* The lightest text permitted anywhere. Measured, not estimated: the
+   * previous value was 4.47:1 and failed the 4.5 floor by a hair. */
+  --text-faint: #74727a;    /*  4.66:1 */
+
+  --accent: #1c4fd8;        /*  6.9:1 */
+  --accent-weak: #e8eeff;
+  --accent-text: #ffffff;
+
+  --ok: #12683f;            /*  5.4:1 */
+  --ok-weak: #e2f3ea;
+  --warn: #8a5a00;          /*  5.1:1 */
+  --warn-weak: #fdf1dc;
+  --danger: #b3261e;        /*  5.9:1 */
+  --danger-weak: #fdeceb;
+
+  --radius: 4px;
+  --pad: 0.5rem;
+
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Identifiers, timestamps and amounts are read by column and compared down
+   * the page, so they are tabular and monospaced everywhere they appear. */
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+
+/* --- theme -------------------------------------------------------------------
+ *
+ * Three states: light, dark, and follow-the-device.
+ *
+ * An explicit override matters more here than on most products, because for
+ * this audience the choice is closer to medical than aesthetic. Light
+ * sensitivity and photophobia — common with migraine, and with several of the
+ * conditions the RPwD Act recognises — make a dark ground far easier to read
+ * for long. Astigmatism runs the other way: light text on a dark ground
+ * halates, and a student with it reads a light theme faster and with less
+ * fatigue. Neither group is served by picking one, and neither is reliably
+ * served by the device setting either, which is often whatever the phone
+ * shipped with or what a family member chose.
+ *
+ * The cascade below gives the device the first word and the person the last:
+ *
+ *   :root                                       the light palette, always defined
+ *   @media dark + :not([data-theme="light"])    the device asks for dark, and
+ *                                               the person has not overridden it
+ *   :root[data-theme="dark"]                    the person chose dark
+ *
+ * Every token is defined on bare :root first, so nothing depends on a media
+ * query having matched.
+ */
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161a;
+    --surface: #1c1f24;
+    --surface-sunken: #24282e;
+    --border: #333941;
+    --border-strong: #6c6e74;
+
+    --text: #e9ecf1;
+    --text-muted: #a6afbd;
+    --text-faint: #8e98a6;
+
+    --accent: #7ea2ff;
+    --accent-weak: #1e2a47;
+    --accent-text: #0d1117;
+
+    --ok: #5fd39a;
+    --ok-weak: #16301f;
+    --warn: #e0b055;
+    --warn-weak: #33260f;
+    --danger: #ff9d95;
+    --danger-weak: #3a1a18;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #14161a;
+  --surface: #1c1f24;
+  --surface-sunken: #24282e;
+  --border: #333941;
+  --border-strong: #6c6e74;
+
+  --text: #e9ecf1;
+  --text-muted: #a6afbd;
+  --text-faint: #8e98a6;
+
+  --accent: #7ea2ff;
+  --accent-weak: #1e2a47;
+  --accent-text: #0d1117;
+
+  --ok: #5fd39a;
+  --ok-weak: #16301f;
+  --warn: #e0b055;
+  --warn-weak: #33260f;
+  --danger: #ff9d95;
+  --danger-weak: #3a1a18;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 14px/1.45 var(--font);
+  /* Request ids, storage keys and email addresses have no space to break at,
+   * so they push their container wide. Only acts where a word cannot fit. */
+  overflow-wrap: break-word;
+  /* Table 3.3 requires text to resize to 200% without loss of function, which
+   * a px-based body size still allows because every length below is in rem or
+   * ch. What it does not allow is a fixed-height layout, so there is none. */
+  -webkit-font-smoothing: antialiased;
+}
+
+/* --- focus ------------------------------------------------------------------
+ * A visible focus indicator is required (section 7.1) and is the single thing
+ * most often removed for looking untidy. It is defined once, globally, and
+ * :focus-visible keeps it off pointer interactions where it would be noise. */
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Only ever paired with :focus-visible above — never a bare `outline: none`. */
+:focus:not(:focus-visible) { outline: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* --- skip link ---------------------------------------------------------------
+ * The first tab stop on every page. Visually hidden until focused, which is
+ * what makes it useful to a keyboard user and invisible to everybody else. */
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.6rem 1rem;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.skip-link:focus { left: 0.5rem; top: 0.5rem; }
+
+/* --- screen-reader-only text -------------------------------------------------
+ * clip-path rather than display:none, so the text stays in the accessibility
+ * tree. Hiding it outright would silence the very announcements this exists for. */
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- layout ------------------------------------------------------------------ */
+
+.shell { display: grid; grid-template-columns: 15rem 1fr; min-height: 100%; }
+/* Set only while the banner is up; read by the sticky table headers above.
+ * A measured value would track a wrapped banner exactly, but a wrapped banner
+ * only happens at widths where the table scrolls in its own box anyway. */
+.shell.with-banner { --sticky-top: 2.4rem; }
+@media (max-width: 60rem) { .shell { grid-template-columns: 1fr; } }
+
+.sidebar {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 1rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+/* Below the two-column breakpoint the sidebar becomes a bar rather than a
+ * stack. Stacked, four sections plus the theme control and two buttons filled
+ * a phone screen before a single row of the table was reachable. */
+@media (max-width: 60rem) {
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .sidebar .nav {
+    flex-direction: row;
+    flex: 1;
+    overflow-x: auto;
+    /* Keeps the focus ring from being clipped by the scroll box. */
+    padding: 2px;
+  }
+  .sidebar-foot {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+    grid-auto-flow: column;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .sidebar-foot .whoami { display: none; }
+  .sidebar-foot .field { min-width: 9rem; }
+}
+
+.brand { font-weight: 700; letter-spacing: -0.01em; padding: 0 0.5rem; }
+.brand small { display: block; font-weight: 400; color: var(--text-muted); font-size: 12px; }
+
+.sidebar-foot {
+  margin-top: auto;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 0.6rem;
+  padding-inline: 0.5rem;
+}
+.whoami { font-size: 12px; }
+
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav a {
+  display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--radius);
+  color: var(--text);
+  text-decoration: none;
+}
+.nav a:hover { background: var(--surface-sunken); }
+.nav a[aria-current="page"] { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+.nav .count {
+  font: 600 11px/1 var(--mono);
+  padding: 0.2rem 0.35rem;
+  border-radius: 999px;
+  background: var(--warn-weak); color: var(--warn);
+}
+
+.main { padding: 1.25rem 1.5rem 3rem; min-width: 0; }
+.page-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.page-head h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+.page-head p { margin: 0.2rem 0 0; color: var(--text-muted); font-size: 13px; max-width: 62ch; }
+
+/* --- slide thumbnails -----------------------------------------------------------
+ *
+ * The operator's check that the right picture is on the right slide, at the size
+ * a list can spare. Capped in height rather than width so a tall upload cannot
+ * push the row it sits in off the screen, and the description is printed under
+ * it — the two are read together or the check is not worth making. */
+.slide-thumb img {
+  display: block;
+  max-width: 100%;
+  max-height: 140px;
+  width: auto; height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+.slide-thumb figcaption { font-size: 12px; margin-top: 0.25rem; }
+.slide-thumb { margin: 0 0 0.75rem; }
+
+/* --- surfaces ------------------------------------------------------------------ */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.card > header {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.card > header h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+
+/* The floor is clamped to the container, not to the viewport.
+ *
+ * A bare minmax(20rem, 1fr) stops shrinking at 20rem and pushes the page
+ * sideways below that — it reads as responsive and is not. min(20rem, 100%)
+ * takes whichever is smaller, so the track collapses to one column on its own.
+ *
+ * A max-width media query would fix the phone case and not this one: these
+ * grids are also used inside a dialog, which is 34rem wide on a desktop where
+ * no viewport breakpoint has matched. The container is what matters, so the
+ * container is what it is measured against. */
+.grid { display: grid; gap: 0.75rem; }
+.grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr)); }
+.grid.cols-4 { grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr)); }
+
+.stat { padding: 0.75rem; }
+.stat dl { margin: 0; }
+.stat dt { font-size: 12px; color: var(--text-muted); margin: 0 0 0.25rem; }
+/* Proportional figures, not tabular. tabular-nums gives every digit the width
+ * of a zero, which is what makes a column of numbers align — and what makes a
+ * single large value like 121 look gappy. Columns get tabular; figures do not. */
+.stat dd { margin: 0; font: 600 20px/1.15 var(--font); letter-spacing: -0.01em; }
+.stat .sub { font: 400 12px/1.35 var(--font); color: var(--text-faint); margin-top: 0.3rem; }
+
+/* The one figure a view leads with. Exactly one per screen — two here, because
+ * the pair is a single fact: money delivered against money still owed. */
+.stat.hero { padding: 1rem 1.1rem; }
+.stat.hero dt { font-size: 13px; }
+.stat.hero dd { font-size: 34px; line-height: 1.05; }
+.stat.hero .sub { font-size: 13px; max-width: 46ch; }
+
+/* --- tables --------------------------------------------------------------------
+ * Real tables with real headers. A grid of divs would look identical and would
+ * leave a screen-reader user with no way to know which column they are in. */
+
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+caption { text-align: left; padding: 0 0.75rem 0.5rem; color: var(--text-muted); font-size: 12px; }
+
+th, td { padding: 0.4rem 0.75rem; text-align: left; vertical-align: top; }
+thead th {
+  /* Clears the impersonation banner, which is sticky at the top of the
+   * viewport during a support session and otherwise slides over the column
+   * headings as the operator scrolls. Zero when there is no banner. */
+  position: sticky; top: var(--sticky-top, 0);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-muted); font-weight: 600;
+  white-space: nowrap;
+}
+tbody tr { border-bottom: 1px solid var(--border); }
+tbody tr:last-child { border-bottom: 0; }
+tbody tr:hover { background: var(--surface-sunken); }
+
+/* anywhere rather than break-word: a uuid is a single 36-character word
+ * with no break opportunity, and break-word declines to split one. A
+ * request id shown to an operator in an error alert has to fit. */
+td.mono, th.mono, .mono {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+td.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+td.actions { white-space: nowrap; text-align: right; }
+
+/* --- pills ----------------------------------------------------------------------
+ * Colour is never the only signal: each pill carries its own text, so the
+ * distinction survives both monochrome rendering and colour blindness. */
+
+.pill {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font: 600 11px/1.5 var(--font);
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.pill.neutral { background: var(--surface-sunken); color: var(--text-muted); border-color: var(--border); }
+.pill.ok      { background: var(--ok-weak);     color: var(--ok);     border-color: currentColor; }
+.pill.warn    { background: var(--warn-weak);   color: var(--warn);   border-color: currentColor; }
+.pill.danger  { background: var(--danger-weak); color: var(--danger); border-color: currentColor; }
+.pill.accent  { background: var(--accent-weak); color: var(--accent); border-color: currentColor; }
+
+/* --- controls --------------------------------------------------------------------- */
+
+button, .btn {
+  font: 500 13px/1 var(--font);
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  /* 24x24 is the WCAG 2.2 AA target-size minimum (2.5.8); the padding above
+   * clears it for every button in the panel. */
+  min-height: 30px;
+}
+button:hover:not(:disabled) { background: var(--surface-sunken); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+button.danger { color: var(--danger); border-color: currentColor; }
+button.subtle { border-color: transparent; background: transparent; color: var(--text-muted); }
+button.subtle:hover:not(:disabled) { background: var(--surface-sunken); color: var(--text); }
+button.sm { padding: 0.25rem 0.5rem; font-size: 12px; min-height: 26px; }
+
+input, select, textarea {
+  font: 400 13px/1.4 var(--font);
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  min-height: 30px;
+  width: 100%;
+}
+textarea { resize: vertical; min-height: 4.5rem; }
+
+.field { display: grid; gap: 0.25rem; margin-bottom: 0.75rem; }
+.field label { font-size: 12px; font-weight: 600; }
+.field .hint { font-size: 12px; color: var(--text-muted); }
+.field .error { font-size: 12px; color: var(--danger); font-weight: 500; }
+.field input[aria-invalid="true"],
+.field textarea[aria-invalid="true"] { border-color: var(--danger); }
+
+.filters { display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap; }
+.filters .field { margin: 0; min-width: 9rem; }
+
+/* --- banner ------------------------------------------------------------------------
+ * The impersonation banner. Deliberately loud and deliberately unmissable:
+ * section 7.2 permits acting as another user only when it is logged and
+ * disclosed, and an operator who forgets they are inside a support session is
+ * the failure that produces both an incorrect audit trail and a frightened user. */
+
+.impersonation-banner {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+  padding: 0.5rem 1rem;
+  background: var(--warn-weak);
+  color: var(--warn);
+  border-bottom: 2px solid currentColor;
+  font-size: 13px; font-weight: 600;
+}
+.impersonation-banner .spacer { flex: 1; }
+
+/* --- dialog -------------------------------------------------------------------------- */
+
+dialog {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0;
+  width: min(34rem, calc(100vw - 2rem));
+}
+dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+dialog h2 { margin: 0; font-size: 15px; }
+dialog .body { padding: 1rem; }
+dialog .head { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
+dialog .foot { padding: 0.75rem 1rem; border-top: 1px solid var(--border); display: flex; gap: 0.5rem; justify-content: flex-end; }
+
+/* --- states ----------------------------------------------------------------------------- */
+
+.state { padding: 2rem 1rem; text-align: center; color: var(--text-muted); font-size: 13px; }
+.state strong { display: block; color: var(--text); margin-bottom: 0.25rem; font-size: 14px; }
+
+.alert {
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid currentColor;
+  font-size: 13px;
+  margin-bottom: 0.75rem;
+}
+.alert.danger { background: var(--danger-weak); color: var(--danger); }
+.alert.ok { background: var(--ok-weak); color: var(--ok); }
+.alert.warn { background: var(--warn-weak); color: var(--warn); }
+.alert p { margin: 0; }
+.alert p + p { margin-top: 0.35rem; }
+
+/* --- login ---------------------------------------------------------------------------------- */
+
+.login { display: grid; place-items: center; min-height: 100%; padding: 2rem 1rem; }
+.login .card { width: min(24rem, 100%); }
+.login .body { padding: 1.25rem; }
+.login h1 { font-size: 17px; margin: 0 0 0.25rem; }
+.login .lede { color: var(--text-muted); font-size: 13px; margin: 0 0 1rem; }
+
+/* --- misc ------------------------------------------------------------------------------------- */
+
+.row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.muted { color: var(--text-muted); }
+.faint { color: var(--text-faint); }
+.right { margin-left: auto; }
+.stack { display: grid; gap: 0.75rem; }
+.nowrap { white-space: nowrap; }
+.truncate { max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.bar { height: 6px; background: var(--surface-sunken); border-radius: 999px; overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--accent); }
+
+.pager { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+
+/* --- grievance thread and message templates ------------------------------------ */
+
+/* The student's own words, set apart from the operator's tooling around them. */
+.quote {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface-sunken);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.thread { display: grid; gap: 0.5rem; margin-bottom: 0.75rem; }
+.msg {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+/* An internal note never leaves the handling team, so it must never be
+ * mistaken for something the student can read. */
+.msg.internal { background: var(--warn-weak); border-color: currentColor; color: var(--warn); }
+
+.msg-subject { margin: 0 0 0.25rem; font-weight: 600; font-size: 13px; }
+.msg-body { margin: 0 0 0.5rem; font-size: 13px; white-space: pre-wrap; }
+.msg-body:last-child { margin-bottom: 0; }
+
+/* Insertable placeholders. Clicking one appends it, which is faster and far
+ * more reliable than retyping a name that must match exactly. */
+.placeholders {
+  display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center;
+  padding: 0.4rem 0.5rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+.placeholders button { font-size: 11px; }
+
+/* --- charts -------------------------------------------------------------------
+ *
+ * Every chart on the dashboard plots a single measure, so there is one colour
+ * in here and no legend anywhere: the accent for data, one step off the
+ * surface for the track it sits in, text tokens for every word. Nothing in a
+ * chart is distinguished by hue alone, because nothing needs to be.
+ */
+
+/* Bars riding inside a table, rather than a chart with a table bolted on. */
+table.bars th[scope="row"] { font-weight: 500; }
+table.bars .bar-cell { width: 45%; min-width: 6rem; vertical-align: middle; }
+
+.bar-track {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+.bar-fill {
+  display: block;
+  height: 100%;
+  /* Square where it meets the baseline, rounded at the data end. */
+  border-radius: 0 4px 4px 0;
+  background: var(--accent);
+  min-width: 2px;
+}
+/* Terminal states — rejected, withdrawn — are counted but are not progress.
+ * Weight rather than hue: the row already says which is which in words, and a
+ * red-against-green pair is the one distinction a colour-blind reader loses. */
+.bar-fill.muted { background: var(--border-strong); }
+
+.chart { min-width: 0; }
+.chart h3 {
+  margin: 0 0 0.5rem;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.chart .plot { position: relative; padding-top: 0.9rem; }
+
+.chart .cols {
+  display: flex;
+  align-items: flex-end;
+  /* The surface gap. 2px of the card showing through is what separates one
+   * column from the next — never a stroke drawn around them. */
+  gap: 2px;
+  height: 64px;
+  /* One hairline baseline, one step off the surface. No gridlines: at this
+   * size they would outweigh the data they are meant to serve. */
+  border-bottom: 1px solid var(--border);
+}
+
+/* The slot is the hit target, not the column. At twelve months in a quarter-
+ * width card a column is a few pixels across, and a hover target that thin is
+ * one nobody lands on. */
+.chart .slot {
+  flex: 1 1 0;
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+  min-width: 0;
+}
+
+.chart .col {
+  width: 100%;
+  /* Capped rather than filling the slot, so the band keeps some air. */
+  max-width: 24px;
+  margin: 0 auto;
+  background: var(--accent);
+  /* Rounded at the data end, square where it meets the baseline. */
+  border-radius: 4px 4px 0 0;
+  transition: background-color 100ms ease-out;
+}
+.chart .col.on { background: var(--text); }
+
+.chart .tip {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.14);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Labelled selectively — the tallest column and the most recent. A value on
+ * every column is chaos and goes unread; the hidden table carries the rest. */
+.chart .cap-label {
+  position: absolute;
+  top: -0.1rem;
+  transform: translateX(-50%);
+  font: 600 10px/1 var(--font);
+  color: var(--text-muted);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.chart .axis-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.3rem;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* --- toasts -----------------------------------------------------------------
+ *
+ * The visible half of an announcement. The spoken half is the sr-only live
+ * region in Announcer.tsx, which is why this stack is aria-hidden: without
+ * that, every confirmation would be read out twice.
+ *
+ * Bottom-left, clear of the table actions on the right, which is where the
+ * operator's pointer already is when the confirmation arrives. Native modal
+ * dialogs render in the top layer and so cover these regardless of z-index —
+ * correct, since a toast fires as the dialog closes rather than behind it. */
+
+.toasts {
+  position: fixed;
+  left: 1rem; bottom: 1rem;
+  z-index: 60;
+  display: grid;
+  gap: 0.5rem;
+  width: min(28rem, calc(100vw - 2rem));
+}
+
+.toast {
+  display: flex; align-items: flex-start; gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid currentColor;
+  background: var(--surface);
+  font-size: 13px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.16);
+  animation: toast-in 140ms ease-out;
+}
+.toast > span { flex: 1; }
+.toast > button { flex: none; }
+
+/* Tone is never the only signal — the sentence says what happened. */
+.toast.ok     { background: var(--ok-weak);     color: var(--ok); }
+.toast.warn   { background: var(--warn-weak);   color: var(--warn); }
+.toast.danger { background: var(--danger-weak); color: var(--danger); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(0.4rem); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* --- stale results ------------------------------------------------------------
+ *
+ * Rows fetched for the previous filter, held on screen while the next request
+ * is in flight.
+ *
+ * Notably NOT dimmed, which was the first instinct and is wrong here. Fading
+ * the region is the usual way to say "this is not current", but it would be
+ * applied over text tuned to sit just above the 4.5:1 floor: measured, opacity
+ * 0.55 drops body text to 3.94:1 and the muted secondary line under every row
+ * to 2.34:1. There is no opacity that both reads as faded and clears the
+ * floor, and the whole point of keeping these rows is that they stay readable
+ * while the operator waits.
+ *
+ * So the signal moves off the text and onto a progress bar, and the region is
+ * made inert instead — a click cannot land on a row that is about to be
+ * replaced by a different one. */
+
+.stale {
+  position: relative;
+  pointer-events: none;
+}
+.stale::before,
+.stale::after {
+  content: "";
+  position: absolute;
+  top: 0; height: 2px;
+  z-index: 1;
+}
+.stale::before { left: 0; right: 0; background: var(--accent-weak); }
+.stale::after {
+  width: 30%;
+  background: var(--accent);
+  animation: sweep 900ms linear infinite;
+}
+
+@keyframes sweep {
+  from { left: -30%; }
+  to   { left: 100%; }
+}
+
+/* The global reduced-motion rule shortens every duration but cannot un-name an
+ * animation, which would leave the bar frozen wherever its last frame landed.
+ * Replaced outright instead: a full-width bar still says "working". */
+@media (prefers-reduced-motion: reduce) {
+  .stale::after { animation: none; left: 0; width: 100%; }
+}
+
+/* --- input with a trailing control ---------------------------------------------
+ * The reveal button on the password field. Padding on the input reserves the
+ * space, so the text never runs under the button at any zoom level. */
+
+.input-affix { position: relative; }
+.input-affix > input { padding-right: 4.25rem; }
+.input-affix > .affix {
+  position: absolute;
+  top: 2px; right: 2px;
+  height: calc(100% - 4px);
+  min-height: 0;
+  color: var(--text-muted);
+}
+.input-affix > .affix:hover { color: var(--text); }
+
+.caps-warning {
+  display: flex; align-items: center; gap: 0.35rem;
+  margin: 0.35rem 0 0;
+  font-size: 12px; font-weight: 500;
+  color: var(--warn);
+}
+
+/* --- keyboard shortcuts ---------------------------------------------------------- */
+
+.shortcuts { margin: 0 0 1rem; display: grid; gap: 0.4rem; }
+.shortcuts > div { display: flex; align-items: baseline; gap: 0.75rem; }
+.shortcuts dt { flex: none; width: 5rem; display: flex; gap: 0.2rem; }
+.shortcuts dd { margin: 0; font-size: 13px; }
+
+kbd {
+  display: inline-block;
+  min-width: 1.5rem;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  background: var(--surface-sunken);
+  font: 600 11px/1.4 var(--mono);
+  text-align: center;
+  color: var(--text);
+}
+
+:root[data-theme="light"] { color-scheme: light; }

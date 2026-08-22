@@ -1,0 +1,298 @@
+# check → image → publish.
+#
+# Three stages, each gating the next: no image is built from a tree that does
+# not lint and compile, and nothing is published that has not been started and
+# exercised as a container first.
+#
+#   check    eslint, the TypeScript project build, and the Vite bundle
+#   image    the container image — built with the defaults, started, and put
+#            through scripts/smoke-image.sh
+#   publish  main only: rebuilt with the production API version and address,
+#            re-checked, then pushed to Docker Hub
+#
+# Why `publish` is separate from `image` rather than one job with an `if`:
+# `production` is a protected environment, and a job that names it waits for its
+# reviewers. Keeping the environment out of the first two stages means a pull
+# request gets full lint, build and container feedback without anyone being
+# asked to approve anything, and the approval is required exactly where it
+# matters — the push.
+#
+# The three `npm run check:*` scripts are deliberately absent. check:routes
+# probes a running API and would need the whole platform stack; check:contrast
+# and check:responsive live in the platform tree's tools/ directory, which is
+# not part of this repository. They belong to a developer's machine and to the
+# platform repository's own CI.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same ref makes this run's answer irrelevant before it
+# finishes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+
+  # ===========================================================================
+  # Stage 1 — check
+  # ===========================================================================
+
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` rather than `npm install`, for the same reason the Dockerfile
+      # uses it: it installs exactly what the lockfile pins and fails if the two
+      # disagree, so CI cannot pass against a dependency tree nobody has.
+      - name: Install
+        run: npm ci
+
+      - name: eslint
+        run: npm run lint
+
+      # tsc -b && vite build. The type check is the half that matters here —
+      # `vite build` alone would happily emit a bundle from code that does not
+      # type-check, because Vite strips types rather than checking them.
+      - name: Type-check and build
+        run: npm run build
+
+      - name: Report bundle sizes
+        run: ls -lh dist/assets/
+
+      # Kept so that a failure downstream can be looked at without a local
+      # toolchain, and so the bundle CI produced can be compared with the one in
+      # an image.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: admin-dist
+          path: dist/
+          retention-days: 7
+
+  # ===========================================================================
+  # Stage 2 — image
+  # ===========================================================================
+  #
+  # Built with the image's own defaults and no secrets, so this stage runs on
+  # every pull request without touching the protected environment. It proves the
+  # Dockerfile, the nginx template and the entrypoint work; the address they are
+  # pointed at is stage 3's business.
+
+  image:
+    name: image
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      TAG: sp-admin:ci-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # load: true, so the image lands in the runner's daemon and can actually
+      # be run. That restricts the build to one platform — an image cannot be
+      # loaded as a manifest list — which is the right trade here: an image that
+      # was never started is not a passing result. If arm64 is ever needed,
+      # build multi-platform in the publish stage and accept that only one of
+      # the two was exercised.
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: ${{ env.TAG }}
+          load: true
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The same script a developer runs, rather than a list of inline
+      # `docker run` steps, so that a failure here is reproducible with one
+      # command instead of being read out of this log.
+      - name: Smoke test
+        run: sh scripts/smoke-image.sh "$TAG"
+
+  # ===========================================================================
+  # Stage 3 — publish
+  # ===========================================================================
+
+  publish:
+    name: publish
+    needs: image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    # The environment holding DOCKER_USERNAME, DOCKER_PASSWORD,
+    # VITE_API_VERSION and VITE_API_TARGET. Its deployment branch rules and
+    # reviewers apply on top of the `if` above, so the protection survives
+    # someone editing this file.
+    environment: production
+
+    # Declared here, not at workflow level: the `secrets` context is not
+    # available in a workflow-level `env` block — only `github`, `vars` and
+    # `inputs` are — so a secret-derived image name has to be scoped to the job.
+    #
+    # A Docker Hub personal namespace IS the account name, so DOCKER_USERNAME is
+    # the right namespace whenever the image belongs to the pushing account.
+    # Set the repository variable IMAGE_NAME to `namespace/name` to override —
+    # an organisation-owned image needs it, because there the pushing account
+    # and the namespace are different names. Being a variable rather than a
+    # secret also keeps the tag readable in the log instead of printing ***.
+    env:
+      IMAGE: ${{ vars.IMAGE_NAME || format('{0}/sp-admin', secrets.DOCKER_USERNAME) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Read through the environment rather than interpolated into the script,
+      # so a value cannot become part of the command that runs it.
+      #
+      # Both are checked before anything is built, because both fail silently.
+      # An empty VITE_API_VERSION is the worse of the two: `--build-arg
+      # VITE_API_VERSION=` overrides the Dockerfile's default with an empty
+      # string, api.ts uses `?? 'v1'` which an empty string satisfies, and the
+      # panel ships calling /api/ — every request a 404 nobody can explain from
+      # the bundle.
+      - name: Resolve the API version and address
+        env:
+          VERSION: ${{ secrets.VITE_API_VERSION }}
+          TARGET: ${{ secrets.VITE_API_TARGET }}
+        run: |
+          set -eu
+          fail=0
+
+          if [ -z "$VERSION" ]; then
+            echo "::error title=VITE_API_VERSION is not set::Add it to the production \
+          environment. It must match API_VERSION on the server — the panel builds every \
+          request path from it, and an empty value ships a build that calls /api/ with no \
+          version at all."
+            fail=1
+          fi
+
+          case "$TARGET" in
+            http://*|https://*) ;;
+            "")
+              echo "::error title=VITE_API_TARGET is not set::Add it to the production \
+          environment, as the API's address including its scheme, for example \
+          https://api.example.org."
+              fail=1
+              ;;
+            *)
+              echo "::error title=VITE_API_TARGET has no scheme::nginx rejects a \
+          proxy_pass target without one. Give it as http:// or https://."
+              fail=1
+              ;;
+          esac
+
+          [ "$fail" -eq 0 ] || exit 1
+
+          # A trailing slash becomes a double slash in every proxied path. The
+          # container's entrypoint strips it too — this is here so that the
+          # value the smoke test asserts on is the value the container will
+          # derive its Host header from.
+          target=${TARGET%/}
+
+          # The secret's own value is masked; this trimmed variant is a
+          # different string and would not be, so mask it as well. It is a
+          # public hostname, but it was given as a secret.
+          echo "::add-mask::$target"
+
+          {
+            echo "API_VERSION=$VERSION"
+            echo "API_TARGET=$target"
+          } >> "$GITHUB_ENV"
+
+      # Same build as stage 2, with the production inputs. VITE_API_VERSION is
+      # compiled into the bundle by Vite and cannot be changed afterwards.
+      # API_TARGET only moves the image's default: it is read at container
+      # start, so the same image can be pointed elsewhere without a rebuild.
+      # It is recorded in the image's config, which for a public repository
+      # means visible — an address is fine there; a credential would not be, and
+      # nothing here takes one.
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          build-args: |
+            VITE_API_VERSION=${{ env.API_VERSION }}
+            API_TARGET=${{ env.API_TARGET }}
+          load: true
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Stage 2 checked the image against its defaults. This checks the thing
+      # that is actually about to be published: that the bundle calls
+      # /api/{the configured version} and that the container proxies to the
+      # configured address. A wrong version or a mistyped host is otherwise a
+      # deployment that starts cleanly and fails on its first request.
+      - name: Smoke test
+        env:
+          EXPECT_API_VERSION: ${{ env.API_VERSION }}
+          EXPECT_API_TARGET: ${{ env.API_TARGET }}
+        run: sh scripts/smoke-image.sh "$IMAGE:$GITHUB_SHA"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Push
+        # `denied: requested access to the resource is denied` arrives AFTER a
+        # successful login, so it never means the credentials are wrong. It
+        # means the namespace does not exist, or the account cannot write to it.
+        # The registry's message names neither, so this one does.
+        run: |
+          set -eu -o pipefail
+
+          # The commit tag is the one to deploy from — it names exactly one
+          # build. `latest` moves, which is convenient for a pull and useless
+          # for knowing what is running.
+          docker tag "$IMAGE:$GITHUB_SHA" "$IMAGE:latest"
+
+          if ! docker push "$IMAGE:$GITHUB_SHA"; then
+            echo "::error title=Push denied::The registry refused the write. The \
+          credentials authenticated, so the destination is what to check: the namespace \
+          must exist on Docker Hub and the account must be able to write to it. It \
+          defaults to DOCKER_USERNAME; set the repository variable IMAGE_NAME to \
+          'namespace/name' if the image belongs to an organisation instead. Also confirm \
+          DOCKER_PASSWORD is a token with Read & Write scope — a read-only token logs in \
+          successfully and then fails exactly like this."
+            exit 1
+          fi
+          docker push "$IMAGE:latest"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published"
+            echo
+            echo '```'
+            echo "$IMAGE:$GITHUB_SHA"
+            echo "$IMAGE:latest"
+            echo '```'
+            echo
+            echo "Deploy the commit tag, not \`latest\`:"
+            echo
+            echo '```sh'
+            echo "ADMIN_IMAGE=$IMAGE:$GITHUB_SHA API_TARGET=… docker compose up -d"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

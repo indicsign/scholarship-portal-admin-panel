@@ -1,0 +1,94 @@
+# The administration panel, on its own.
+#
+#   docker compose up -d --build          build this repository and run it
+#   docker compose pull && docker compose up -d    run the published image
+#
+# The panel is one container: a static bundle behind an nginx that also proxies
+# /api to the API, so the browser only ever sees one origin. It needs to be told
+# where the API is and nothing else. See .env.example, which compose reads from
+# .env in this directory automatically.
+#
+# The API, the workers and the data stores are not here. They are a separate
+# repository with a compose file of its own; this one is for deploying the panel
+# against an API that is already running somewhere. To bring the whole platform
+# up locally instead, use the compose file at the root of the platform tree —
+# it builds this same Dockerfile and needs no configuration, because the default
+# API_TARGET is the API's service name on that stack's network.
+
+name: scholarship-admin
+
+services:
+  admin:
+    # The published image, and the tag to deploy is a commit rather than
+    # `latest`: `latest` moves, which is convenient for a pull and useless for
+    # knowing what is running. CI pushes both.
+    image: ${ADMIN_IMAGE:-indicsign/sp-admin:latest}
+
+    # Present so that this file also builds the panel from source — the image
+    # above is then the tag the build is given. `docker compose up` builds only
+    # when that tag is not already present locally, so a deployment that means
+    # to run the published image should `docker compose pull` first.
+    build:
+      context: .
+      args:
+        # Must match API_VERSION on the server. Baked into the bundle by Vite,
+        # so this is a build input and not an environment variable below.
+        VITE_API_VERSION: ${API_VERSION:-v1}
+
+    environment:
+      # Where the API is: scheme://host[:port], no trailing path. Read at
+      # container start, which is why the published image does not need
+      # rebuilding to be pointed somewhere else.
+      #
+      # The default is the API's compose service name, which is only reachable
+      # if this container shares a network with it — see the networks note at
+      # the bottom of this file. Deployed, this is the API's public address.
+      API_TARGET: ${API_TARGET:-http://api:8080}
+
+      # Docker's embedded DNS resolves the name above. It is present on this
+      # compose network; it does not exist on the default bridge, so a plain
+      # `docker run` of this image needs a real resolver here instead.
+      DNS_RESOLVER: ${DNS_RESOLVER:-127.0.0.11}
+
+    ports:
+      # Loopback by default, because the API sets the refresh cookie Secure
+      # whenever APP_ENV=production: served over plain HTTP the browser
+      # discards it and the operator is signed out by the first token refresh.
+      # Something that terminates TLS belongs in front of this — a reverse proxy
+      # on the host, or a tunnel — and it reaches the panel on loopback.
+      #
+      # Set ADMIN_BIND=0.0.0.0 only when whatever terminates TLS is on another
+      # machine and the link between them is trusted.
+      - "${ADMIN_BIND:-127.0.0.1}:${ADMIN_PORT:-5174}:80"
+
+    # Static files and a proxy. Nothing here needs to acquire privileges, and
+    # saying so costs nothing.
+    security_opt:
+      - no-new-privileges:true
+
+    # Liveness comes from the image's own HEALTHCHECK, which asks for
+    # /nginx-alive — served by this nginx from its own configuration, reaching
+    # nothing else. Deliberately not /healthz: that one proxies to the API, so a
+    # panel serving perfectly in front of a stopped API would report itself
+    # unhealthy and be restarted for somebody else's outage.
+    #
+    # `unless-stopped` rather than `always`, so a container stopped by hand
+    # stays stopped, and everything else — a crash, a host reboot — comes back.
+    restart: unless-stopped
+
+    # An access log line per request, kept bounded. Without this the json-file
+    # driver grows until the disk is full, which on a long-lived deployment is
+    # the first outage nobody predicted.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# To sit beside a backend stack running on this same host, join its network and
+# leave API_TARGET at its default — the service name then resolves:
+#
+# networks:
+#   default:
+#     name: indic-scholarship_default
+#     external: true

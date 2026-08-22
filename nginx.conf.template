@@ -1,0 +1,154 @@
+# nginx for the platform administration panel.
+#
+# The panel and the API must look like ONE origin to the browser. The refresh
+# token is an HttpOnly cookie scoped to /api/{version}/auth: served from a
+# separate origin it would need CORS with credentials on every call and a
+# SameSite=None cookie, which is a materially weaker position than not being
+# cross-origin at all. Proxying here is the same move vite.config.ts makes in
+# development, so this image and `npm run dev` behave identically.
+#
+# --- why this is a template --------------------------------------------------
+#
+# The API's address is not a property of this panel. In the compose stack it is
+# a service name; deployed, it is a public hostname over TLS. Baking either one
+# into the image would mean the image that was tested is not the image that
+# runs — so the address arrives as configuration and nginx's own entrypoint
+# substitutes it at container start.
+#
+# The nginx image renders /etc/nginx/templates/*.template into /etc/nginx/conf.d
+# with envsubst before starting. Only the three names in NGINX_ENVSUBST_FILTER
+# are substituted, which is what keeps $host, $request_uri and the rest of
+# nginx's own variables below from being replaced by the empty string.
+#
+#   API_TARGET     scheme://host[:port] of the API      http://api:8080
+#   API_HOST       what to send as Host; derived from API_TARGET if unset
+#   DNS_RESOLVER   who resolves that host               127.0.0.11
+#
+# See docker-entrypoint.d/10-api-target.envsh for the derivation and the
+# defaults, and README.md for when each needs setting.
+
+server {
+    listen      80;
+    server_name _;
+
+    root  /usr/share/nginx/html;
+    index index.html;
+
+    # Uploads pass through here on their way to the API, whose own limit is
+    # HTTP_BODY_LIMIT_BYTES (12 MiB by default) against a MAX_UPLOAD_BYTES of
+    # 10 MiB. nginx defaults to 1 MiB, which would reject a perfectly valid
+    # disability certificate with a 413 the API never sees and cannot explain.
+    # Kept above the API's limit so that the API is what enforces the rule and
+    # what reports it.
+    client_max_body_size 12m;
+
+    # Vite fingerprints everything under /assets, so those are immutable.
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # index.html must never be cached: it names the fingerprinted bundles, so a
+    # stale copy pins the browser to asset filenames that no longer exist.
+    location = /index.html {
+        add_header Cache-Control "no-store";
+    }
+
+    # A single-page application. Every unmatched path is a client-side route,
+    # not a 404 — reloading the page on /organisations/123 must serve the app.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # --- the API -------------------------------------------------------------
+    #
+    # Resolving through a variable, rather than letting proxy_pass bake the
+    # address in at parse time, has three effects that matter here: nginx starts
+    # even when the API is not up yet instead of refusing to load its own
+    # configuration, it follows the API to a new address when that container is
+    # replaced instead of serving 502 until this one is restarted as well, and a
+    # DNS record that moves — which is the normal case for a load-balanced API —
+    # is picked up within the resolver's TTL.
+    #
+    # In the compose stack this is Docker's embedded DNS. It exists only on
+    # user-defined networks: a container started with `docker run` and no
+    # --network has no resolver on 127.0.0.11, and every proxied request answers
+    # 502 with "no resolver defined" or a resolution timeout in the error log.
+    # Point DNS_RESOLVER at a real resolver in that case.
+    resolver ${DNS_RESOLVER} valid=10s ipv6=off;
+
+    location /api/ {
+        # With a variable in proxy_pass, nginx no longer appends the request URI
+        # on its own — hence $request_uri, which carries the path and the query
+        # string exactly as they arrived. The API mounts its routes under
+        # /api/{API_VERSION}; rewriting anything here would silently remount
+        # them, so the URI is passed through untouched.
+        set $api ${API_TARGET};
+        proxy_pass $api$request_uri;
+        proxy_http_version 1.1;
+
+        # The API's host, not the browser's. A deployed API is reached by a name
+        # that resolves to a shared load balancer or a TLS terminator, and both
+        # route on Host — sending this panel's hostname there returns somebody
+        # else's vhost or a certificate mismatch. Nothing in the API derives a
+        # URL from Host (signed document URLs are relative and the CORS check
+        # reads Origin), so the original hostname is informational and travels
+        # as X-Forwarded-Host.
+        proxy_set_header Host             ${API_HOST};
+        proxy_set_header X-Forwarded-Host $host;
+
+        # Sent so that an https:// API target gets SNI. Without it the
+        # handshake offers no server name and a shared terminator answers with
+        # its default certificate, which fails verification.
+        proxy_ssl_server_name on;
+
+        proxy_set_header X-Real-IP         $remote_addr;
+        # The API believes this only from the addresses listed in its
+        # HTTP_TRUSTED_PROXIES. It has to be believed: the client address is the
+        # rate-limit key and goes into the audit trail, so without that entry
+        # every visitor to this panel is rate-limited as a single client — this
+        # container — and the trail names it as the actor behind every request.
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        # $scheme is what reached *this* nginx. Where TLS is terminated in front
+        # of this container, that is http, and the API is told http. Nothing in
+        # the API reads it today; if that changes, this is the line to derive
+        # from the incoming X-Forwarded-Proto instead — and doing so means
+        # trusting a header a client can set, so it needs the terminator to
+        # overwrite it rather than pass it through.
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Long enough for a report export, short enough that a wedged upstream
+        # is not held open indefinitely.
+        proxy_connect_timeout 5s;
+        proxy_read_timeout    60s;
+        proxy_send_timeout    60s;
+    }
+
+    # The probes, proxied so that a health page served from this origin can
+    # reach them without leaving it. This container's own liveness is the
+    # static root below, not these — a healthy panel in front of a stopped API
+    # must not report itself unhealthy and be restarted for it.
+    location = /healthz {
+        set $api_health ${API_TARGET};
+        proxy_pass $api_health$request_uri;
+        proxy_set_header Host ${API_HOST};
+        proxy_ssl_server_name on;
+    }
+
+    location = /readyz {
+        set $api_ready ${API_TARGET};
+        proxy_pass $api_ready$request_uri;
+        proxy_set_header Host ${API_HOST};
+        proxy_ssl_server_name on;
+    }
+
+    # What the container's own health check asks for: served by this nginx from
+    # its own disk, reaching nothing else. 204 and no body, so a probe every few
+    # seconds costs nothing and never appears as a page view.
+    location = /nginx-alive {
+        access_log off;
+        add_header Cache-Control "no-store";
+        return 204;
+    }
+}

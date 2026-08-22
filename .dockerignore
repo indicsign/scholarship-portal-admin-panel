@@ -1,0 +1,21 @@
+# Reinstalled from the lockfile inside the image. Copying the host's tree in
+# would be slow and, on a different platform, wrong.
+node_modules/
+
+# Build output, rebuilt inside the image.
+dist/
+
+# Host-local configuration.
+.env
+.env.local
+
+# Repository furniture the build does not read. Excluded so that editing a
+# workflow or the deployment compose file does not invalidate the npm ci layer
+# and rebuild the bundle.
+.git/
+.github/
+.gitignore
+docker-compose.yml
+Dockerfile
+.dockerignore
+README.md

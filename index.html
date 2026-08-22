@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- An operations console holding applicant data has no business in a
+         search index or in a referrer sent to a third party. -->
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="referrer" content="same-origin" />
+    <title>Admin · Scholarship Platform</title>
+    <script>
+      // Applied before the first paint, deliberately blocking.
+      //
+      // Reading the preference from React would leave one frame of the light
+      // palette on screen before the dark one replaces it — a white flash in a
+      // darkened room, at the exact moment somebody who chose dark for light
+      // sensitivity is looking at it.
+      try {
+        var t = localStorage.getItem('scholarship.theme')
+        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t)
+      } catch (e) { /* private browsing; the media query still applies */ }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

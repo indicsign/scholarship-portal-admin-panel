@@ -1,0 +1,78 @@
+#!/bin/sh
+# Works out where the API is, before nginx's own template rendering runs.
+#
+# The nginx image's entrypoint runs everything in /docker-entrypoint.d in name
+# order, and *.envsh files are SOURCED rather than executed — which is the only
+# reason this can hand values to 20-envsubst-on-templates.sh, the script that
+# renders nginx.conf.template. Hence the name: renaming this to .sh makes it run
+# in a subshell of its own, export nothing, and leave the template rendered with
+# three empty strings.
+#
+# One setting arrives from the environment:
+#
+#   API_TARGET     scheme://host[:port] of the API. Defaults to the compose
+#                  service name, so the development stack needs no configuration.
+#
+# and two are derived from it, each overridable:
+#
+#   API_HOST       the Host header sent upstream — API_TARGET without its scheme
+#   DNS_RESOLVER   who resolves that host; Docker's embedded DNS by default
+
+set -eu
+
+: "${API_TARGET:=http://api:8080}"
+: "${DNS_RESOLVER:=127.0.0.11}"
+
+# proxy_pass through a variable needs the scheme in the string; without it nginx
+# rejects the configuration at start-up with "invalid URL prefix". Refusing here
+# instead names the setting and the value, which that message does not.
+#
+# Checked before the trimming below, because trimming "https://" would leave
+# "https:" and the message would quote something the operator never typed.
+case "$API_TARGET" in
+    http://*|https://*) ;;
+    *)
+        echo "10-api-target: API_TARGET must start with http:// or https://, got '$API_TARGET'" >&2
+        exit 1
+        ;;
+esac
+
+# The Host header to send upstream: the target without its scheme, port kept
+# (a Host must carry the port whenever it is not the scheme's default, and the
+# compose target is api:8080), path dropped.
+derived_host="${API_TARGET#*://}"
+derived_host="${derived_host%%/*}"
+
+if [ -z "$derived_host" ]; then
+    echo "10-api-target: API_TARGET has a scheme but no host: '$API_TARGET'" >&2
+    exit 1
+fi
+
+: "${API_HOST:=$derived_host}"
+
+# A trailing slash becomes a double slash in every proxied path, because
+# proxy_pass concatenates $request_uri onto this string and $request_uri always
+# begins with one. //api/v1/auth/login is not a route the API mounts, so the
+# whole panel would answer 404 from a value that looks perfectly correct — and
+# .env.example documents this setting with a trailing slash.
+while [ "${API_TARGET%/}" != "$API_TARGET" ]; do
+    API_TARGET="${API_TARGET%/}"
+done
+
+# Anything left after the host is a path, and it is prefixed to every proxied
+# request: with API_TARGET=https://example.org/backend the panel's
+# /api/v1/organisations arrives as /backend/api/v1/organisations. That is right
+# for an API mounted under a path and wrong for everything else, so it is
+# reported rather than silently accepted.
+api_path="${API_TARGET#*://}"
+api_path="${api_path#"$derived_host"}"
+if [ -n "$api_path" ]; then
+    echo "10-api-target: note: '$api_path' is prefixed to every proxied path" >&2
+fi
+
+export API_TARGET API_HOST DNS_RESOLVER
+
+# Printed because a panel that cannot reach its API is the failure this image is
+# most likely to be deployed with, and the first question is always which
+# address it was given. No credentials are involved — it is a hostname.
+echo "10-api-target: proxying /api to $API_TARGET (Host: $API_HOST, resolver: $DNS_RESOLVER)"

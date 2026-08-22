@@ -1,0 +1,184 @@
+/* Authentication state for the panel.
+ *
+ * Two things here are not incidental.
+ *
+ * The access token is held in memory and nowhere else. localStorage would
+ * survive a reload, which is convenient, and would also hand the token to any
+ * script that manages to run on this origin. The refresh cookie is HttpOnly and
+ * already provides the survive-a-reload behaviour without that exposure, so a
+ * reload silently re-establishes the session instead.
+ *
+ * The MFA step is a first-class state rather than an error. Every role that can
+ * use this panel is required to hold a second factor (Table 3.3), so the
+ * two-step flow is the normal path, not the exceptional one.
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+
+import * as api from './api'
+import { AuthContext, type AuthApi, type AuthState } from './auth-context'
+import { isPlatformRole } from './roles'
+import type { LoginResult, Role } from './types'
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<AuthState>({
+    status: 'loading',
+    context: null,
+    contexts: [],
+    impersonation: null,
+    error: null,
+  })
+
+  /** Credentials held between the password step and the MFA step. */
+  const pending = useRef<{ identifier: string; password: string } | null>(null)
+  /** Cleared when a support session lapses on its own. */
+  const impersonationTimer = useRef<number | null>(null)
+
+  const applyLogin = useCallback((result: LoginResult) => {
+    if (result.mfa_required) {
+      // The token issued here opens the MFA challenge and nothing else, so it
+      // is deliberately not installed as the session token.
+      setState(s => ({ ...s, status: 'mfa_required', error: null }))
+      return
+    }
+
+    if (!isPlatformRole(result.active_context.role)) {
+      // A student or an NGO case worker has a valid account and no business in
+      // this panel. Refusing here, rather than letting every request 403, is
+      // the difference between one clear sentence and a wall of failures.
+      api.setAccessToken(null)
+      setState({
+        status: 'anonymous', context: null, contexts: [], impersonation: null,
+        error: 'This account does not have access to the admin panel. '
+             + 'Sign in to the portal for your organisation instead.',
+      })
+      return
+    }
+
+    api.setAccessToken(result.token.access_token)
+    pending.current = null
+    setState({
+      status: 'authenticated',
+      context: result.active_context,
+      contexts: result.contexts,
+      impersonation: null,
+      error: null,
+    })
+  }, [])
+
+  const signOut = useCallback(async () => {
+    await api.logout()
+    api.setAccessToken(null)
+    pending.current = null
+    if (impersonationTimer.current) window.clearTimeout(impersonationTimer.current)
+    setState({
+      status: 'anonymous', context: null, contexts: [], impersonation: null, error: null,
+    })
+  }, [])
+
+  // A reload leaves no token in memory but the refresh cookie is still there,
+  // so the session is re-established rather than the operator being asked to
+  // sign in again for having pressed F5.
+  useEffect(() => {
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const res = await api.request<{ data: LoginResult }>('/auth/refresh', {
+          method: 'POST', raw: true,
+        })
+        if (!cancelled) applyLogin(res.data)
+      } catch {
+        if (!cancelled) setState(s => ({ ...s, status: 'anonymous' }))
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [applyLogin])
+
+  // A failed refresh mid-session means the session is genuinely over.
+  useEffect(() => {
+    api.setAuthLostHandler(() => {
+      api.setAccessToken(null)
+      setState({
+        status: 'anonymous', context: null, contexts: [], impersonation: null,
+        error: 'Your session has ended. Please sign in again.',
+      })
+    })
+    return () => api.setAuthLostHandler(null)
+  }, [])
+
+  const signIn = useCallback(async (identifier: string, password: string, mfaCode?: string) => {
+    setState(s => ({ ...s, error: null }))
+
+    const creds = mfaCode
+      ? pending.current ?? { identifier, password }
+      : { identifier, password }
+
+    try {
+      const res = await api.login({ ...creds, ...(mfaCode ? { mfa_code: mfaCode } : {}) })
+      if (res.data.mfa_required) pending.current = creds
+      applyLogin(res.data)
+    } catch (err) {
+      const message = err instanceof api.ApiError
+        ? err.message
+        : 'We could not reach the server. Check that the API is running.'
+      setState(s => ({ ...s, error: message }))
+      throw err
+    }
+  }, [applyLogin])
+
+  const startImpersonation = useCallback(async (targetUserId: string, reason: string) => {
+    const res = await api.post<import('./types').ImpersonationResult>('/admin/impersonate', {
+      target_user_id: targetUserId,
+      reason,
+    })
+
+    const { token, session_id, acting_as, notice, expires_at } = res.data
+    api.setAccessToken(token.access_token)
+
+    setState(s => ({
+      ...s,
+      impersonation: { sessionId: session_id, actingAs: acting_as, notice },
+    }))
+
+    // The server caps the session at fifteen minutes. Clearing local state when
+    // it lapses stops the banner claiming an active session that has already
+    // ended — which would leave an operator believing they are still acting as
+    // somebody while their requests fail.
+    if (impersonationTimer.current) window.clearTimeout(impersonationTimer.current)
+    const remaining = new Date(expires_at).getTime() - Date.now()
+    impersonationTimer.current = window.setTimeout(() => {
+      setState(s => ({ ...s, impersonation: null }))
+      void signOut()
+    }, Math.max(remaining, 0))
+  }, [signOut])
+
+  const endImpersonation = useCallback(async () => {
+    try {
+      // Not under /admin, unlike the endpoint that STARTS a session. During a
+      // session the token carries the target's role, so a platform-scoped path
+      // would be unreachable from inside the very session it ends. The
+      // asymmetry in the URL mirrors the asymmetry in who may call it.
+      await api.post('/impersonate/end')
+    } finally {
+      if (impersonationTimer.current) window.clearTimeout(impersonationTimer.current)
+      // The impersonation token is denylisted server-side when the session
+      // ends, so there is no way back to the operator's own token from here.
+      // Signing out and back in is the honest outcome.
+      await signOut()
+    }
+  }, [signOut])
+
+  const can = useCallback(
+    (...roles: Role[]) => !!state.context && roles.includes(state.context.role),
+    [state.context],
+  )
+
+  const value = useMemo<AuthApi>(
+    () => ({ ...state, signIn, signOut, startImpersonation, endImpersonation, can }),
+    [state, signIn, signOut, startImpersonation, endImpersonation, can],
+  )
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+}
