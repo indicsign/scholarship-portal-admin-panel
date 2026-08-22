@@ -45,10 +45,16 @@ services:
       # the bottom of this file. Deployed, this is the API's public address.
       API_TARGET: ${API_TARGET:-http://api:8080}
 
-      # Docker's embedded DNS resolves the name above. It is present on this
-      # compose network; it does not exist on the default bridge, so a plain
-      # `docker run` of this image needs a real resolver here instead.
-      DNS_RESOLVER: ${DNS_RESOLVER:-127.0.0.11}
+      # Passed through only if it is set. Left empty, the container reads its
+      # own /etc/resolv.conf, which on this network is Docker's embedded DNS —
+      # naming 127.0.0.11 here would be the same answer, arrived at by assuming
+      # rather than by looking.
+      DNS_RESOLVER: ${DNS_RESOLVER:-}
+
+      # PORT is not set, and should not be: the platform convention the image
+      # follows belongs to hosts that assign a port and route only to it.
+      # Here the mapping below is what publishes the panel, and the image's
+      # default of 80 is the container side of it.
 
     ports:
       # Loopback by default, because the API sets the refresh cookie Secure

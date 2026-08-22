@@ -22,13 +22,25 @@
 #
 #   API_TARGET     scheme://host[:port] of the API      http://api:8080
 #   API_HOST       what to send as Host; derived from API_TARGET if unset
-#   DNS_RESOLVER   who resolves that host               127.0.0.11
+#   DNS_RESOLVER   who resolves that host; the container's own nameservers
+#   LISTEN_PORT    the port to serve on; PORT if the platform set one, else 80
+#   LISTEN_IPV6    the IPv6 listen directive, or empty where there is no IPv6
 #
-# See docker-entrypoint.d/10-api-target.envsh for the derivation and the
+# See docker-entrypoint.d/16-api-target.envsh for the derivation and the
 # defaults, and README.md for when each needs setting.
 
 server {
-    listen      80;
+    # The port comes from the environment because container platforms assign one
+    # and route only to it — see LISTEN_PORT in the entrypoint. Compose and
+    # `docker run -p …:80` set nothing and get 80.
+    #
+    # The IPv6 line is a whole directive rather than an address, because it has
+    # to disappear entirely on a host without IPv6: nginx does not warn about an
+    # unavailable address family, it exits. The image's own
+    # 10-listen-on-ipv6-by-default.sh cannot do this for us — it edits the stock
+    # default.conf, which rendering this template then overwrites.
+    listen      ${LISTEN_PORT};
+    ${LISTEN_IPV6}
     server_name _;
 
     root  /usr/share/nginx/html;

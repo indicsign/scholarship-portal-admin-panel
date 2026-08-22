@@ -200,20 +200,29 @@ Two settings point the panel at an API, and they are not interchangeable:
 | Setting | Read | Why it has to be there |
 |---|---|---|
 | `VITE_API_VERSION` | at build | Vite substitutes `import.meta.env` into the bundle, so the version every request path is built from is fixed when the image is built. It cannot be changed on a running container. Must match `API_VERSION` on the server |
-| `API_TARGET` | at container start | nginx's proxy target. Deliberately *not* baked in, so one image serves any environment. `scheme://host[:port]`, no trailing path |
+| `API_TARGET` | at container start | nginx's proxy target. Deliberately *not* baked in, so one image serves any environment. `scheme://host[:port]`; a trailing slash is stripped, a missing scheme is refused by name, and a path is prefixed to every proxied request and logged as such |
 
 `API_TARGET` defaults to `http://api:8080` — the API's service name on the
 platform stack's compose network, which is what makes the root compose file work
 with no configuration. Deployed, it is the API's own address, and two things
 about the container change with it:
 
-- **DNS.** The name is resolved through `DNS_RESOLVER`, which defaults to
-  Docker's embedded DNS at `127.0.0.11`. That exists on a compose network and
-  **not** on the default bridge, so `docker run` with no `--network` answers 502
-  for every proxied request until `DNS_RESOLVER` names a real resolver.
+- **DNS.** The name is resolved through `DNS_RESOLVER`, which is taken from the
+  container's own `/etc/resolv.conf` — Docker's embedded DNS on a compose
+  network, the platform's resolver anywhere else. Set it only to override that.
 - **`Host`.** nginx sends the API's hostname upstream, not the browser's,
   because a deployed API is reached through something that routes on `Host`.
   The original travels as `X-Forwarded-Host`.
+
+Two more settings exist for the places this gets deployed, and neither needs
+touching under compose:
+
+- **`PORT`.** Platforms that assign a port set it and route only to it. The
+  image listens on what `PORT` names, or 80, and the `HEALTHCHECK` resolves the
+  same value — `LISTEN_PORT` overrides both.
+- **`LISTEN_IPV6`.** The container listens on IPv6 wherever the kernel has it.
+  Set this empty on a host that reports IPv6 but has it administratively
+  disabled, where binding `[::]` stops nginx from starting at all.
 
 The API sets the refresh cookie `Secure` whenever `APP_ENV=production`, so the
 panel must be served over HTTPS or the operator is signed out by the first token
@@ -263,8 +272,9 @@ image actually looks like — none of which is a build failure: the config
 template rendered with the address it was given, an address nginx would reject is
 refused by name at start-up, the bundle calls the API version it was built for,
 a deep link reloads as the app rather than a 404, `/api` is proxied rather than
-swallowed by the single-page fallback, and a missing fingerprinted asset is a
-404 rather than HTML served where JavaScript was asked for.
+swallowed by the single-page fallback, a missing fingerprinted asset is a 404
+rather than HTML served where JavaScript was asked for, and a platform-assigned
+`PORT` moves both the listen directive and the socket that answers.
 
 ## Not built yet
 

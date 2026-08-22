@@ -1,0 +1,147 @@
+#!/bin/sh
+# Works out where the API is, and what to listen on, before the configuration
+# template is rendered.
+#
+# The nginx image's entrypoint runs everything in /docker-entrypoint.d in name
+# order, and *.envsh files are SOURCED rather than executed — which is the only
+# reason this can hand values to 20-envsubst-on-templates.sh, the script that
+# renders nginx.conf.template. Renaming this to .sh makes it run in a subshell of
+# its own, export nothing, and leave the template rendered from an empty
+# environment.
+#
+# The 16 is load-bearing too. It has to sort after two of the image's own
+# scripts and before the third:
+#
+#   15-local-resolvers.envsh   exports NGINX_LOCAL_RESOLVERS, read below
+#   16-api-target.envsh        this
+#   20-envsubst-on-templates.sh  renders the template from what we exported
+#
+# and 10-listen-on-ipv6-by-default.sh, which sorts before all of them, is why
+# LISTEN_IPV6 exists: that script edits /etc/nginx/conf.d/default.conf, which at
+# that point is still the image's stock file. Rendering the template overwrites
+# it a moment later, so its work is discarded and the listen directive has to
+# come from here instead.
+#
+# One setting arrives from the environment:
+#
+#   API_TARGET     scheme://host[:port] of the API. Defaults to the compose
+#                  service name, so the development stack needs no configuration.
+#
+# and the rest are derived, each overridable:
+#
+#   API_HOST       the Host header sent upstream — API_TARGET without its scheme
+#   DNS_RESOLVER   who resolves that host
+#   LISTEN_PORT    the port nginx serves on
+#   LISTEN_IPV6    the IPv6 listen directive, or nothing
+
+set -eu
+
+: "${API_TARGET:=http://api:8080}"
+
+# proxy_pass through a variable needs the scheme in the string; without it nginx
+# rejects the configuration at start-up with "invalid URL prefix". Refusing here
+# instead names the setting and the value, which that message does not.
+#
+# Checked before the trimming below, because trimming "https://" would leave
+# "https:" and the message would quote something the operator never typed.
+case "$API_TARGET" in
+    http://*|https://*) ;;
+    *)
+        echo "16-api-target: API_TARGET must start with http:// or https://, got '$API_TARGET'" >&2
+        exit 1
+        ;;
+esac
+
+# The Host header to send upstream: the target without its scheme, port kept
+# (a Host must carry the port whenever it is not the scheme's default, and the
+# compose target is api:8080), path dropped.
+derived_host="${API_TARGET#*://}"
+derived_host="${derived_host%%/*}"
+
+if [ -z "$derived_host" ]; then
+    echo "16-api-target: API_TARGET has a scheme but no host: '$API_TARGET'" >&2
+    exit 1
+fi
+
+: "${API_HOST:=$derived_host}"
+
+# A trailing slash becomes a double slash in every proxied path, because
+# proxy_pass concatenates $request_uri onto this string and $request_uri always
+# begins with one. //api/v1/auth/login is not a route the API mounts, so the
+# whole panel would answer 404 from a value that looks perfectly correct — and
+# .env.example documents this setting with a trailing slash.
+while [ "${API_TARGET%/}" != "$API_TARGET" ]; do
+    API_TARGET="${API_TARGET%/}"
+done
+
+# Anything left after the host is a path, and it is prefixed to every proxied
+# request: with API_TARGET=https://example.org/backend the panel's
+# /api/v1/organisations arrives as /backend/api/v1/organisations. That is right
+# for an API mounted under a path and wrong for everything else, so it is
+# reported rather than silently accepted.
+api_path="${API_TARGET#*://}"
+api_path="${api_path#"$derived_host"}"
+if [ -n "$api_path" ]; then
+    echo "16-api-target: note: '$api_path' is prefixed to every proxied path" >&2
+fi
+
+# --- who resolves that host --------------------------------------------------
+#
+# 15-local-resolvers.envsh has already read /etc/resolv.conf and exported the
+# container's own nameservers, which is a better default than naming one:
+# on a compose network that IS Docker's embedded DNS at 127.0.0.11, and on the
+# default bridge or a cloud host it is whatever the platform actually provides.
+# Hardcoding 127.0.0.11 made `docker run` with no --network answer 502 for every
+# proxied request, because nothing listens there off a user-defined network.
+local_resolvers=$(printf '%s' "${NGINX_LOCAL_RESOLVERS:-}" | tr -d ' ')
+if [ -n "$local_resolvers" ]; then
+    : "${DNS_RESOLVER:=${NGINX_LOCAL_RESOLVERS}}"
+else
+    # An empty or nameserver-less /etc/resolv.conf. `resolver;` with no address
+    # is a configuration error and nginx would not start at all, so fall back to
+    # the embedded DNS and let a proxied request be what fails.
+    : "${DNS_RESOLVER:=127.0.0.11}"
+fi
+
+# --- what to listen on -------------------------------------------------------
+#
+# PORT is the convention every container platform uses to tell an application
+# which port it will route to, and a panel listening on 80 while the platform
+# probes 8080 fails its health check with nginx logging nothing wrong. Compose
+# and `docker run -p …:80` set no PORT, so the default stays 80 and the EXPOSE,
+# the compose port mapping and the image's HEALTHCHECK all still line up.
+: "${LISTEN_PORT:=${PORT:-80}}"
+
+case "$LISTEN_PORT" in
+    ''|*[!0-9]*)
+        echo "16-api-target: LISTEN_PORT must be a number, got '$LISTEN_PORT'" >&2
+        exit 1
+        ;;
+esac
+
+# The same test the image's own IPv6 script makes. Binding [::] on a host with
+# IPv6 disabled in the kernel is not a warning — nginx exits with "Address
+# family not supported by protocol" and the container never serves anything.
+#
+# Assigned with ${VAR-default} rather than :=, so that LISTEN_IPV6= (explicitly
+# empty) opts out. That is the escape hatch for a host where the file exists but
+# the address family is administratively disabled — net.ipv6.conf.all.disable_ipv6
+# leaves /proc/net/if_inet6 in place and fails the bind anyway, which the image's
+# own script gets wrong too.
+if [ -f /proc/net/if_inet6 ]; then
+    LISTEN_IPV6="${LISTEN_IPV6-listen      [::]:${LISTEN_PORT};}"
+else
+    LISTEN_IPV6="${LISTEN_IPV6-}"
+fi
+
+export API_TARGET API_HOST DNS_RESOLVER LISTEN_PORT LISTEN_IPV6
+
+# Printed because a panel that cannot reach its API is the failure this image is
+# most likely to be deployed with, and the first question is always which
+# address it was given. No credentials are involved — it is a hostname.
+if [ -n "$LISTEN_IPV6" ]; then
+    echo "16-api-target: listening on $LISTEN_PORT (IPv4 and IPv6)"
+else
+    echo "16-api-target: listening on $LISTEN_PORT (IPv4 only, no /proc/net/if_inet6)"
+fi
+echo "16-api-target: proxying /api to $API_TARGET (Host: $API_HOST, resolver: $DNS_RESOLVER)"

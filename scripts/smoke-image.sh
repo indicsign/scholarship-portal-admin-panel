@@ -22,6 +22,7 @@
 #   * a deep link reloads as the app, not as a 404
 #   * /api is proxied rather than swallowed by the single-page fallback
 #   * a fingerprinted asset that does not exist is a 404, not index.html
+#   * a platform-assigned PORT is honoured, in the config and on the socket
 set -eu
 
 # The tag to exercise. Defaults to what `docker compose build` produces locally,
@@ -34,7 +35,7 @@ PORT=${PORT:-18174}
 NAME="sp-admin-smoke-$$"
 FAILED=0
 
-cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
+cleanup() { docker rm -f "$NAME" "${NAME}-port" >/dev/null 2>&1 || true; }
 trap cleanup EXIT INT TERM
 
 pass() { printf '  ok    %s\n' "$1"; }
@@ -71,6 +72,40 @@ if printf '%s' "$rendered" | grep -qE "proxy_set_header +Host +${expect_host};";
     pass "sends Host: $expect_host upstream"
 else
     fail "the rendered config does not send Host: $expect_host"
+fi
+
+if printf '%s' "$rendered" | grep -qE '^ *listen +80;'; then
+    pass "listens on 80 by default"
+else
+    fail "the rendered config does not listen on 80"
+fi
+
+# Container platforms assign a port through PORT and route only to it. A panel
+# listening on 80 there fails its health check with nginx logging nothing wrong.
+port_rendered=$(docker run --rm -e API_TARGET="$EXPECT_API_TARGET" -e PORT=8080 "$IMAGE" nginx -T 2>&1) || {
+    echo "$port_rendered"
+    fail "nginx rejected its configuration with PORT set"
+    exit 1
+}
+if printf '%s' "$port_rendered" | grep -qE '^ *listen +8080;' &&
+   ! printf '%s' "$port_rendered" | grep -qE '^ *listen +80;'; then
+    pass "PORT=8080 moves the listen directive, and nothing still listens on 80"
+else
+    printf '%s' "$port_rendered" | grep -nE '^ *listen' || true
+    fail "PORT=8080 did not move the listen directive"
+fi
+
+# Every IPv6 directive has to carry the same port as its IPv4 pair, or the
+# platform routes to a socket nothing is on. Skipped where the kernel running
+# this has no IPv6 — the directive is absent by design there.
+if printf '%s' "$port_rendered" | grep -qE '^ *listen +\[::\]:'; then
+    if printf '%s' "$port_rendered" | grep -qE '^ *listen +\[::\]:8080;'; then
+        pass "the IPv6 directive follows PORT too"
+    else
+        fail "the IPv6 directive is on a different port from the IPv4 one"
+    fi
+else
+    echo "  skip  no IPv6 directive (no /proc/net/if_inet6 in this container)"
 fi
 
 # An unsubstituted ${NAME} parses as a literal and silently proxies nowhere, so
@@ -191,6 +226,49 @@ case "$code" in
     200)     fail "/api/$EXPECT_API_VERSION answered 200 — it is being served by the app, not proxied" ;;
     *)       pass "/api/$EXPECT_API_VERSION is proxied (upstream answered $code)" ;;
 esac
+
+# --- 5. and it serves on a platform-assigned port -----------------------------
+#
+# The configuration checks above prove the directive moved. This proves the
+# socket did, which is the half a platform's health check actually asks about.
+
+echo
+echo "serving on a platform-assigned PORT"
+alt_name="${NAME}-port"
+alt_port=$((PORT + 1))
+docker rm -f "$alt_name" >/dev/null 2>&1 || true
+docker run -d --name "$alt_name" -p "127.0.0.1:${alt_port}:8080" \
+    -e API_TARGET="$EXPECT_API_TARGET" -e PORT=8080 "$IMAGE" >/dev/null
+
+up=0
+i=0
+while [ "$i" -lt 30 ]; do
+    if [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${alt_port}/nginx-alive" || true)" = "204" ]; then
+        up=1
+        break
+    fi
+    i=$((i + 1))
+    sleep 1
+done
+
+if [ "$up" -eq 1 ]; then
+    pass "PORT=8080 is what the container actually listens on"
+else
+    docker logs "$alt_name" 2>&1 | tail -20
+    fail "nothing answered on the port PORT named"
+fi
+
+# The image's HEALTHCHECK resolves the port at run time; on the wrong port it
+# reports unhealthy forever and a platform restarts a container that is serving
+# perfectly.
+health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$alt_name" 2>/dev/null || echo none)
+case "$health" in
+    unhealthy) fail "the container's own health check calls itself unhealthy on PORT=8080" ;;
+    none)      echo "  skip  no health state yet (the check has a start period)" ;;
+    *)         pass "the container's own health check is $health on PORT=8080" ;;
+esac
+
+docker rm -f "$alt_name" >/dev/null 2>&1 || true
 
 echo
 if [ "$FAILED" -eq 0 ]; then
