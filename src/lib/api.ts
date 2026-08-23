@@ -8,8 +8,8 @@
 import type { ApiErrorBody, Envelope } from './types'
 
 /** Must match API_VERSION on the server; see .env.example. */
-const VERSION = import.meta.env.VITE_API_VERSION ?? 'v1'
-const BASE = `/api/${VERSION}`
+const VERSION = import.meta.env.VITE_API_VERSION
+const BASE = `${import.meta.env.API_TARGET ?? ''}/api/${VERSION}`
 
 /** A failure the API described, as against a network or parsing failure. */
 export class ApiError extends Error {

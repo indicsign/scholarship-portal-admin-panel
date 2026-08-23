@@ -93,14 +93,22 @@ fi
 # default bridge or a cloud host it is whatever the platform actually provides.
 # Hardcoding 127.0.0.11 made `docker run` with no --network answer 502 for every
 # proxied request, because nothing listens there off a user-defined network.
+# Which of the three it came from is logged, because the fallback value and
+# Docker's real answer are the same string: a line reading "resolver:
+# 127.0.0.11" is either a working embedded DNS or nothing listening at all, and
+# on a host that is not Docker the difference is every proxied request.
 local_resolvers=$(printf '%s' "${NGINX_LOCAL_RESOLVERS:-}" | tr -d ' ')
-if [ -n "$local_resolvers" ]; then
-    : "${DNS_RESOLVER:=${NGINX_LOCAL_RESOLVERS}}"
+if [ -n "${DNS_RESOLVER:-}" ]; then
+    resolver_source="set explicitly"
+elif [ -n "$local_resolvers" ]; then
+    DNS_RESOLVER="$NGINX_LOCAL_RESOLVERS"
+    resolver_source="from /etc/resolv.conf"
 else
     # An empty or nameserver-less /etc/resolv.conf. `resolver;` with no address
     # is a configuration error and nginx would not start at all, so fall back to
     # the embedded DNS and let a proxied request be what fails.
-    : "${DNS_RESOLVER:=127.0.0.11}"
+    DNS_RESOLVER=127.0.0.11
+    resolver_source="FALLBACK — /etc/resolv.conf named no nameserver"
 fi
 
 # --- what to listen on -------------------------------------------------------
@@ -144,4 +152,5 @@ if [ -n "$LISTEN_IPV6" ]; then
 else
     echo "16-api-target: listening on $LISTEN_PORT (IPv4 only, no /proc/net/if_inet6)"
 fi
-echo "16-api-target: proxying /api to $API_TARGET (Host: $API_HOST, resolver: $DNS_RESOLVER)"
+echo "16-api-target: proxying /api to $API_TARGET (Host: $API_HOST)"
+echo "16-api-target: resolver: $DNS_RESOLVER ($resolver_source)"
