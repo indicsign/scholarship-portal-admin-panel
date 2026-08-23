@@ -13,11 +13,12 @@ export type Role =
   | 'COMPLIANCE'
   | 'STUDENT'
   | 'GUARDIAN'
-  | 'NGO_ADMIN' | 'NGO_CASE_WORKER' | 'NGO_VERIFIER'
-  | 'CORPORATE_ADMIN' | 'CORPORATE_REVIEWER' | 'CORPORATE_FINANCE'
-  | 'GOVT_DEPARTMENT_ADMIN' | 'GOVT_VERIFICATION_OFFICER' | 'GOVT_FINANCE_OFFICER'
+  // One role per kind of organisation. There were nine — an admin, a verifier
+  // and a finance or case-working role for each type — and the difference
+  // between them was a separation of duties the platform no longer keeps.
+  | 'NGO' | 'CORPORATE' | 'GOVT' | 'PRIVATE'
 
-export type OrgType = 'NGO' | 'CORPORATE' | 'GOVERNMENT'
+export type OrgType = 'NGO' | 'CORPORATE' | 'GOVERNMENT' | 'PRIVATE'
 export type OrgStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'SUSPENDED' | 'REJECTED'
 
 export interface Envelope<T> {

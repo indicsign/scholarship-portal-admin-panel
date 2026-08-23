@@ -35,35 +35,38 @@ import type { PlatformUser, Role } from '../lib/types'
  * administrator's convenience.
  */
 
-/* The platform creates an organisation's administrator and nobody else.
+/* The platform creates an organisation's first member and nobody else.
  *
- * Case workers, verifiers, reviewers and finance officers are added by that
- * administrator from their own People screen — which knows the organisation's
- * type and so offers only the roles it can hold, and which keeps who-does-what
- * inside a tenant a decision made inside that tenant. Offering the other six
- * here would mean the platform staffing somebody else's organisation, and doing
- * it through a typed-in name with no way to narrow the roles to the type.
+ * Everyone after them is added by that person from their own People screen,
+ * which keeps who-works-here a decision made inside the tenant rather than by
+ * the platform staffing somebody else's organisation through a typed-in name.
+ *
+ * There is one role per kind of organisation, so this list is the four of them
+ * and the choice is really the choice of organisation — which is why the
+ * organisation-type select below sets it, and why picking one that disagrees
+ * with the named organisation is refused by name rather than surfacing as a
+ * database trigger.
  *
  * One consequence worth knowing: a membership is UNIQUE (user_id,
- * organisation_id), so naming somebody who is already a member moves them to
- * administrator rather than adding a second role.
+ * organisation_id), so naming somebody who is already a member changes their
+ * organisation rather than adding a second membership.
  */
-const ORG_ROLES: Role[] = [
-  'NGO_ADMIN', 'CORPORATE_ADMIN', 'GOVT_DEPARTMENT_ADMIN',
-]
+const ORG_ROLES: Role[] = ['NGO', 'CORPORATE', 'GOVT', 'PRIVATE']
 
-/** The one admin role each organisation type can hold. */
+/** The one role each organisation type can hold. */
 const ADMIN_ROLE_FOR: Record<string, Role | undefined> = {
-  NGO: 'NGO_ADMIN',
-  CORPORATE: 'CORPORATE_ADMIN',
-  GOVERNMENT: 'GOVT_DEPARTMENT_ADMIN',
+  NGO: 'NGO',
+  CORPORATE: 'CORPORATE',
+  GOVERNMENT: 'GOVT',
+  PRIVATE: 'PRIVATE',
 }
 
 type Tab = 'platform' | 'organisation' | 'student'
 
 const TABS: { id: Tab; label: string; hint: string }[] = [
   { id: 'platform', label: 'Platform', hint: 'Super admins, staff and compliance officers.' },
-  { id: 'organisation', label: 'Organisations', hint: 'People acting for an NGO, a company or a department.' },
+  { id: 'organisation', label: 'Organisations',
+    hint: 'People acting for an NGO, a company, a department or a private body.' },
   { id: 'student', label: 'Students', hint: 'Applicants. They register themselves.' },
 ]
 
@@ -316,10 +319,10 @@ function AddDialog({
   const [fields, setFields] = useState<Record<string, string>>({})
 
   // Typed, not chosen from a list, so nothing here knows the organisation's
-  // type until the server resolves the name. The three admin roles are offered
-  // and the service refuses a mismatch by name — "a NGO organisation cannot
-  // hold that role" — rather than letting the database trigger surface as an
-  // internal error.
+  // type until the server resolves the name. All four roles are offered and the
+  // service names the one that fits — "this organisation's members hold the NGO
+  // role" — rather than letting the database trigger surface as an internal
+  // error.
   const roles = kind === 'platform' ? PLATFORM_ROLES : ORG_ROLES
   const ready = !!email && (kind === 'platform' || (!!org.trim() && !!role))
 
@@ -367,8 +370,10 @@ function AddDialog({
           <p>
             No approved organisation is named “{org.trim()}”, so it will be
             created as {orgType === 'GOVERNMENT' ? 'a government department'
-              : orgType === 'CORPORATE' ? 'a company' : 'an NGO'} and approved,
-            with this person as its administrator. They then add their own staff.
+              : orgType === 'CORPORATE' ? 'a company'
+              : orgType === 'PRIVATE' ? 'a private organisation'
+              : 'an NGO'} and approved, with this person as its first member.
+            They then add everybody else.
           </p>
         </div>
       )}
@@ -446,6 +451,7 @@ function AddDialog({
               <option value="NGO">NGO</option>
               <option value="CORPORATE">Corporate</option>
               <option value="GOVERNMENT">Government department</option>
+              <option value="PRIVATE">Private organisation</option>
             </select>
           )}
         </Field>
@@ -456,7 +462,7 @@ function AddDialog({
         required
         error={fields.role}
         hint={kind === 'organisation'
-          ? 'Administrators only. They add their own staff from their People screen.'
+          ? 'Set by the kind of organisation. They add everybody else themselves.'
           : undefined}
       >
         {props => (

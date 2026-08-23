@@ -12,21 +12,28 @@ export function isPlatformRole(role: Role | undefined) {
   return !!role && PLATFORM_ROLES.includes(role)
 }
 
-/* The three roles that mean anything inside an organisation of a given type.
+/* The role that means anything inside an organisation of a given type.
  *
- * A government department cannot appoint a "corporate reviewer": the database
- * refuses it in a trigger, and offering it here only to have it rejected would
- * be a worse way to find that out. Mirrors org/src/lib/roles.ts, which the
- * organisation portal uses for the same form.
+ * Exactly one, now — the kind of organisation determines it. A government
+ * department cannot hold CORPORATE: the database refuses it in a trigger, and
+ * offering it here only to have it rejected would be a worse way to find that
+ * out. Still returns an array, because the caller renders a list and because
+ * this returning more than one again is the shape a restored separation of
+ * duties would take. Mirrors org/src/lib/roles.ts.
  */
 export function rolesFor(type: OrgType | undefined): Role[] {
   switch (type) {
-    case 'NGO': return ['NGO_ADMIN', 'NGO_CASE_WORKER', 'NGO_VERIFIER']
-    case 'CORPORATE': return ['CORPORATE_ADMIN', 'CORPORATE_REVIEWER', 'CORPORATE_FINANCE']
-    case 'GOVERNMENT':
-      return ['GOVT_DEPARTMENT_ADMIN', 'GOVT_VERIFICATION_OFFICER', 'GOVT_FINANCE_OFFICER']
+    case 'NGO': return ['NGO']
+    case 'CORPORATE': return ['CORPORATE']
+    case 'GOVERNMENT': return ['GOVT']
+    case 'PRIVATE': return ['PRIVATE']
     default: return []
   }
+}
+
+/** The one role each kind of organisation holds, for a form that needs it flat. */
+export function roleForOrgType(type: OrgType | undefined): Role | undefined {
+  return rolesFor(type)[0]
 }
 
 /* How a role is written for a person to read.
@@ -43,6 +50,10 @@ const ROLE_LABELS: Partial<Record<Role, string>> = {
   TECHNICAL: 'Technical',
   STAFF: 'Staff',
   COMPLIANCE: 'Compliance',
+  // NGO survives humanise() intact; the other three do not read well shouted.
+  CORPORATE: 'Corporate',
+  GOVT: 'Government',
+  PRIVATE: 'Private',
 }
 
 export function roleLabel(role: string) {

@@ -88,6 +88,7 @@ export default function Organisations() {
                 <option value="NGO">NGO</option>
                 <option value="CORPORATE">Corporate</option>
                 <option value="GOVERNMENT">Government</option>
+                <option value="PRIVATE">Private</option>
               </select>
             </div>
           </div>
