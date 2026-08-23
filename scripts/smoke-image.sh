@@ -177,14 +177,49 @@ pass "answers /nginx-alive"
 
 status() { curl -s -o /dev/null -w '%{http_code}' "$base$1"; }
 
-# The root, and a deep link. Both must be the app: a reload on /organisations is
-# the single-page fallback, and a 404 there is the classic broken deployment.
-for path in / /organisations /organisations/00000000-0000-0000-0000-000000000000; do
+location_of() { curl -sI "$base$1" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2}'; }
+
+# The root is the app, and every other path is a redirect to it.
+#
+# This inverts what the test used to assert, deliberately. The panel routes in
+# memory (MemoryRouter, src/main.tsx), so no screen has a URL of its own and
+# there is nothing for a reload on /organisations to resolve. Serving the app
+# there would leave that path sitting in the address bar and in history, which is
+# precisely what the in-memory router exists to prevent — so a 200 here is now as
+# wrong as the 404 that used to be the classic broken deployment.
+code=$(status /)
+if [ "$code" = "200" ] && curl -s "$base/" | grep -q 'id="root"'; then
+    pass "GET / serves the app"
+else
+    fail "GET / answered $code"
+fi
+
+for path in /organisations /organisations/00000000-0000-0000-0000-000000000000; do
     code=$(status "$path")
-    if [ "$code" = "200" ] && curl -s "$base$path" | grep -q 'id="root"'; then
-        pass "GET $path serves the app"
+    dest=$(location_of "$path")
+    # nginx may answer `return 302 /` with a bare path or an absolute URL
+    # depending on how the request arrived; both mean the same thing.
+    case "$dest" in
+        / | *://*/) landed=root ;;
+        *)          landed=$dest ;;
+    esac
+    if [ "$code" = "302" ] && [ "$landed" = "root" ]; then
+        pass "GET $path redirects to /"
     else
-        fail "GET $path answered $code"
+        fail "GET $path answered $code (Location: ${dest:-none}) — expected a 302 to /"
+    fi
+done
+
+# A real file at the root must survive that redirect. `try_files $uri @to_root`
+# is the whole difference between the two, and a blanket redirect that swallowed
+# the favicon would ship as a working panel with a broken browser tab — the kind
+# of thing nobody files a bug about and everybody notices.
+for f in /favicon.svg /icons.svg; do
+    code=$(status "$f")
+    if [ "$code" = "200" ]; then
+        pass "$f is served, not redirected"
+    else
+        fail "$f answered $code — the redirect is eating root-level files"
     fi
 done
 
