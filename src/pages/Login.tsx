@@ -134,12 +134,12 @@ export default function Login() {
             ) : (
               <>
                 <div className="alert ok" role="status">
-                  Password accepted. Enter the code from your authenticator app.
+                  Password accepted. We have emailed you a sign-in code.
                 </div>
 
                 <Field
-                  label="Authentication code"
-                  hint="Six digits, from the app you enrolled."
+                  label="Sign-in code"
+                  hint="Six digits, from the email we just sent you."
                   required
                 >
                   {props => (

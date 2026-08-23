@@ -299,7 +299,6 @@ export interface UserSummary {
   email?: string
   phone?: string
   status: string
-  mfa_enabled: boolean
   last_login_at?: string
   created_at: string
   roles: Role[]

@@ -8,7 +8,8 @@ cd ../backend && make dev     # API + workers
 npm run dev                   # this panel, on :5174
 ```
 
-Sign in with `admin` / `Sde@2026`, and a code from `cd ../backend && make totp`.
+Sign in with `admin` / `Sde@2026`. A sign-in code is emailed each time; get it
+with `cd ../backend && make token ACCOUNT=admin`.
 
 The field takes a username, an email address or a mobile number, so
 `superadmin@example.org` reaches the same account. Every other seeded account
