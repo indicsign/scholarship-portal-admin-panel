@@ -6,8 +6,8 @@ import { date, humanise } from '../lib/format'
 import { Dialog, Empty, ErrorState, Field, Loading, Pill, StatusPill } from '../components/ui'
 import { useDebounced, useQuery } from '../lib/hooks'
 import { useAnnounce } from '../lib/announce'
-import { PLATFORM_ROLES, rolesFor } from '../lib/roles'
-import type { Organisation, OrgType, PlatformUser, Role } from '../lib/types'
+import { PLATFORM_ROLES } from '../lib/roles'
+import type { PlatformUser, Role } from '../lib/types'
 
 /* User management.
  *
@@ -33,6 +33,23 @@ import type { Organisation, OrgType, PlatformUser, Role } from '../lib/types'
  * person is a data request, which answers a legal right rather than an
  * administrator's convenience.
  */
+
+/* The platform creates an organisation's administrator and nobody else.
+ *
+ * Case workers, verifiers, reviewers and finance officers are added by that
+ * administrator from their own People screen — which knows the organisation's
+ * type and so offers only the roles it can hold, and which keeps who-does-what
+ * inside a tenant a decision made inside that tenant. Offering the other six
+ * here would mean the platform staffing somebody else's organisation, and doing
+ * it through a typed-in name with no way to narrow the roles to the type.
+ *
+ * One consequence worth knowing: a membership is UNIQUE (user_id,
+ * organisation_id), so naming somebody who is already a member moves them to
+ * administrator rather than adding a second role.
+ */
+const ORG_ROLES: Role[] = [
+  'NGO_ADMIN', 'CORPORATE_ADMIN', 'GOVT_DEPARTMENT_ADMIN',
+]
 
 type Tab = 'platform' | 'organisation' | 'student'
 
@@ -105,7 +122,7 @@ export default function Users() {
           * have no profile and the portal would have nowhere to send them. */}
         {tab !== 'student' && (
           <button className="primary" onClick={() => setAdding(true)}>
-            {tab === 'platform' ? 'Add to platform' : 'Add to an organisation'}
+            {tab === 'platform' ? 'Add to platform' : 'Add an organisation admin'}
           </button>
         )}
       </div>
@@ -276,24 +293,18 @@ function AddDialog({
 }) {
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
-  const [orgID, setOrgID] = useState('')
+  const [org, setOrg] = useState('')
   const [role, setRole] = useState<Role>(kind === 'platform' ? 'PLATFORM_STAFF' : 'NGO_CASE_WORKER')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Only approved organisations. A pending one has no administrator yet and no
-  // scholarships, so a member added to it could do nothing.
-  const orgs = useQuery<Organisation[]>(
-    signal => kind === 'organisation'
-      ? api.get('/admin/organisations', { status: 'APPROVED', page_size: 200 }, signal)
-      : Promise.resolve({ data: [] as Organisation[] } as never),
-    [kind],
-  )
-
-  const chosen = orgs.data?.find(o => o.organisation_id === orgID)
-  const orgRoles = rolesFor(chosen?.org_type as OrgType | undefined)
-  const roles = kind === 'platform' ? PLATFORM_ROLES : orgRoles
-  const ready = !!email && (kind === 'platform' || (!!orgID && !!role))
+  // Typed, not chosen from a list, so nothing here knows the organisation's
+  // type until the server resolves the name. The three admin roles are offered
+  // and the service refuses a mismatch by name — "a NGO organisation cannot
+  // hold that role" — rather than letting the database trigger surface as an
+  // internal error.
+  const roles = kind === 'platform' ? PLATFORM_ROLES : ORG_ROLES
+  const ready = !!email && (kind === 'platform' || (!!org.trim() && !!role))
 
   async function save() {
     setBusy(true)
@@ -303,7 +314,7 @@ function AddDialog({
         email,
         phone: phone || undefined,
         role,
-        organisation_id: kind === 'organisation' ? orgID : undefined,
+        organisation: kind === 'organisation' ? org.trim() : undefined,
       })
       onDone(`${email} added as ${humanise(role).toLowerCase()}. A temporary password has been emailed.`)
     } catch (err) {
@@ -316,7 +327,9 @@ function AddDialog({
   return (
     <Dialog
       open
-      title={kind === 'platform' ? 'Add someone to the platform' : 'Add someone to an organisation'}
+      title={kind === 'platform'
+        ? 'Add someone to the platform'
+        : 'Add an organisation administrator'}
       onClose={onClose}
       footer={
         <>
@@ -352,27 +365,20 @@ function AddDialog({
       </Field>
 
       {kind === 'organisation' && (
-        <Field label="Organisation" required hint="Which tenant this role is held in.">
+        <Field
+          label="Organisation"
+          required
+          hint="Its name, exactly as it appears on the Organisations screen. An identifier works too."
+        >
           {props => (
-            <select
+            <input
               {...props}
-              value={orgID}
-              onChange={e => {
-                setOrgID(e.target.value)
-                // The roles depend on the type, so a stale choice from the
-                // previous organisation must not survive the change.
-                const next = orgs.data?.find(o => o.organisation_id === e.target.value)
-                const allowed = rolesFor(next?.org_type as OrgType | undefined)
-                if (allowed.length) setRole(allowed[0])
-              }}
-            >
-              <option value="">Choose one…</option>
-              {orgs.data?.map(o => (
-                <option key={o.organisation_id} value={o.organisation_id}>
-                  {o.name} — {humanise(o.org_type)}
-                </option>
-              ))}
-            </select>
+              type="text"
+              autoComplete="off"
+              value={org}
+              onChange={e => setOrg(e.target.value)}
+              placeholder="Sahyog Foundation"
+            />
           )}
         </Field>
       )}
@@ -381,7 +387,7 @@ function AddDialog({
         label="Role"
         required
         hint={kind === 'organisation'
-          ? 'Only the three that exist inside an organisation of that type.'
+          ? 'Administrators only. They add their own staff from their People screen.'
           : undefined}
       >
         {props => (
@@ -389,9 +395,7 @@ function AddDialog({
             {...props}
             value={role}
             onChange={e => setRole(e.target.value as Role)}
-            disabled={kind === 'organisation' && !orgID}
           >
-            {roles.length === 0 && <option value="">Choose an organisation first</option>}
             {roles.map(r => <option key={r} value={r}>{humanise(r)}</option>)}
           </select>
         )}
