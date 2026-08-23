@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../lib/auth-context'
+import { rememberPlace } from '../lib/place'
 import { roleLabel } from '../lib/roles'
 import AccountMenu from './AccountMenu'
 import NotificationBell from './NotificationBell'
@@ -190,6 +191,11 @@ export default function Layout({
    * Skipped on first paint, where stealing focus from the document would
    * interrupt a reader who has not started. */
   useEffect(() => {
+    /* Remembered so a refresh returns to this screen. The URL no longer carries
+     * it — see main.tsx — and losing your place on every reload would be a poor
+     * trade for a clean address bar. sessionStorage, so it dies with the tab. */
+    rememberPlace(location.pathname)
+
     const section = sections.find(s => s.to === location.pathname)
     document.title = section
       ? `${section.label} · Admin panel`

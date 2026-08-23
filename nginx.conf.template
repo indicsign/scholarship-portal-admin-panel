@@ -67,10 +67,30 @@ server {
         add_header Cache-Control "no-store";
     }
 
-    # A single-page application. Every unmatched path is a client-side route,
-    # not a 404 — reloading the page on /organisations/123 must serve the app.
+    # A single-page application whose every screen lives at the root.
+    #
+    # The app routes in memory (see MemoryRouter in src/main.tsx), so a path is
+    # never written to the address bar and there is nothing for a reload to
+    # resolve. Serving the app on an arbitrary path would leave that path
+    # sitting in the address bar and in history — which is the thing the
+    # in-memory router exists to avoid — so anything that is not a real file is
+    # sent back to the root.
+    #
+    # 302 rather than 301: a permanent redirect would be cached by every browser
+    # that ever saw it, which is a poor thing to be stuck with if paths are ever
+    # wanted again.
+    location = / {
+        try_files /index.html =404;
+    }
+
     location / {
-        try_files $uri $uri/ /index.html;
+        # Root-level static files — favicon.svg, icons.svg — are real and must
+        # still be served. Only paths with no file behind them are redirected.
+        try_files $uri @to_root;
+    }
+
+    location @to_root {
+        return 302 /;
     }
 
     # --- the API -------------------------------------------------------------
