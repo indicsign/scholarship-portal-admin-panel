@@ -198,32 +198,118 @@ body {
 
 /* --- layout ------------------------------------------------------------------ */
 
-.shell { display: grid; grid-template-columns: 15rem 1fr; min-height: 100%; }
+/* The rail's two widths. One place, because the grid column, the overlay and
+ * the top bar's left edge all have to agree, and three magic numbers that must
+ * match is three chances for them not to. */
+:root { --rail: 3.5rem; --rail-open: 15rem; }
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--rail) 1fr;
+  min-height: 100%;
+  /* The widening sidebar is positioned against this. */
+  position: relative;
+}
 /* Set only while the banner is up; read by the sticky table headers above.
  * A measured value would track a wrapped banner exactly, but a wrapped banner
  * only happens at widths where the table scrolls in its own box anyway. */
 .shell.with-banner { --sticky-top: 2.4rem; }
 @media (max-width: 60rem) { .shell { grid-template-columns: 1fr; } }
 
+.col { display: flex; flex-direction: column; min-width: 0; }
+
+/* --- the rail ---------------------------------------------------------------
+ *
+ * Collapsed it is a column of glyphs; hovered or focused it becomes the full
+ * labelled sidebar, laid over the content rather than pushing it. Pushing would
+ * reflow a wide table under the reader's cursor every time they crossed the
+ * left edge, which costs more than the width it buys back.
+ *
+ * position: absolute with a fixed left edge and no `right`, so the width is free
+ * to animate without the grid recomputing anything. The grid column stays at
+ * --rail throughout, which is what keeps the content still. */
 .sidebar {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: var(--rail);
+  z-index: 30;
   background: var(--surface);
   border-right: 1px solid var(--border);
-  padding: 1rem 0.75rem;
+  padding: 1rem 0.55rem;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 1rem;
+  overflow: hidden;
+  transition: width 140ms ease, box-shadow 140ms ease;
 }
+
+/* :focus-within is not a nicety — it is the whole keyboard story. Tabbing into
+ * a rail that stayed collapsed would move focus through ten links whose labels
+ * are clipped to 3.5rem. */
+.sidebar:focus-within {
+  width: var(--rail-open);
+  box-shadow: var(--shadow-lg, 0 8px 30px rgb(0 0 0 / 0.18));
+  overflow: visible;
+}
+/* Guarded, so a touch device does not sit on a permanently collapsed rail
+ * waiting for a hover that never arrives — see the no-hover rule below. */
+@media (hover: hover) {
+  .sidebar:hover {
+    width: var(--rail-open);
+    box-shadow: var(--shadow-lg, 0 8px 30px rgb(0 0 0 / 0.18));
+    overflow: visible;
+  }
+}
+/* A pointer that cannot hover has no way to widen the rail, so on those devices
+ * above the bar breakpoint it simply stays open. Rare — a touchscreen laptop —
+ * but the alternative is ten unlabelled glyphs and no way to read them. */
+@media (hover: none) and (min-width: 60.0625rem) {
+  .shell { grid-template-columns: var(--rail-open) 1fr; }
+  .sidebar { position: static; width: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar { transition: none; }
+}
+
+/* Labels and the brand's words are present in the DOM at every width — a
+ * screen reader reads them, and `title` gives a pointer the same text — and are
+ * clipped rather than removed while the rail is narrow. display:none would take
+ * them out of the accessibility tree along with the layout. */
+.nav-label, .brand-text, .count-n {
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+.sidebar:focus-within .nav-label,
+.sidebar:focus-within .brand-text,
+.sidebar:focus-within .count-n { opacity: 1; }
+@media (hover: hover) {
+  .sidebar:hover .nav-label,
+  .sidebar:hover .brand-text,
+  .sidebar:hover .count-n { opacity: 1; }
+}
+@media (hover: none) and (min-width: 60.0625rem) {
+  .nav-label, .brand-text, .count-n { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-label, .brand-text, .count-n { transition: none; }
+}
+
 /* Below the two-column breakpoint the sidebar becomes a bar rather than a
- * stack. Stacked, four sections plus the theme control and two buttons filled
- * a phone screen before a single row of the table was reachable. */
+ * stack, and the rail is abandoned: on a phone there is no pointer to hover
+ * with, and ten glyphs in a row are less use than ten labels you can scroll. */
 @media (max-width: 60rem) {
   .sidebar {
+    position: static;
+    width: auto;
     border-right: 0;
     border-bottom: 1px solid var(--border);
     flex-direction: row;
     align-items: center;
     flex-wrap: wrap;
     gap: 0.75rem;
+    overflow: visible;
+    box-shadow: none;
   }
   .sidebar .nav {
     flex-direction: row;
@@ -232,46 +318,264 @@ body {
     /* Keeps the focus ring from being clipped by the scroll box. */
     padding: 2px;
   }
-  .sidebar-foot {
-    margin-top: 0;
-    padding-top: 0;
-    border-top: 0;
-    grid-auto-flow: column;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  .sidebar-foot .whoami { display: none; }
-  .sidebar-foot .field { min-width: 9rem; }
+  .nav-label, .brand-text, .count-n { opacity: 1; }
+  .brand-text small { display: none; }
 }
 
-.brand { font-weight: 700; letter-spacing: -0.01em; padding: 0 0.5rem; }
-.brand small { display: block; font-weight: 400; color: var(--text-muted); font-size: 12px; }
-
-.sidebar-foot {
-  margin-top: auto;
-  padding-top: 1rem;
-  border-top: 1px solid var(--border);
-  display: grid;
-  gap: 0.6rem;
-  padding-inline: 0.5rem;
+.brand {
+  display: flex; align-items: center; gap: 0.55rem;
+  font-weight: 700; letter-spacing: -0.01em;
+  padding: 0 0.15rem;
+  white-space: nowrap;
 }
-.whoami { font-size: 12px; }
+/* The one thing that stays legible at 3.5rem, so the rail has a top rather than
+ * beginning abruptly at the first glyph. */
+.brand-mark {
+  flex: none;
+  width: 1.85rem; height: 1.85rem;
+  display: grid; place-items: center;
+  border-radius: var(--radius);
+  background: var(--accent-weak); color: var(--accent);
+  font: 700 12px/1 var(--mono);
+}
+.brand-text small { display: block; font-weight: 400; color: var(--text-muted); font-size: 12px; }
 
 .nav { display: flex; flex-direction: column; gap: 2px; }
+
+/* --- the groups -------------------------------------------------------------
+ *
+ * The heading and the separator do the same job at two widths. Open, the words
+ * label the cluster; collapsed, the words are unreadable at 3.5rem so the rule
+ * above them carries the whole grouping — which is the point, because four
+ * clusters of glyphs are navigable from memory and ten in a row are not. */
+.nav-group { display: flex; flex-direction: column; gap: 2px; }
+
+.nav-rule {
+  height: 1px;
+  margin: 0.5rem 0.15rem 0.35rem;
+  background: var(--border);
+}
+
+.nav-group-label {
+  padding: 0 0.5rem 0.15rem;
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  /* Collapsed the words would clip mid-letter against the rail's edge, which
+   * reads as a rendering fault rather than as a deliberate truncation. So the
+   * row is removed from the layout and the rule above it stands in — the labels
+   * are aria-hidden either way, so nothing is lost to a screen reader. */
+  height: 0; overflow: hidden; opacity: 0;
+  transition: opacity 100ms ease;
+}
+.sidebar:focus-within .nav-group-label { height: auto; opacity: 1; }
+@media (hover: hover) {
+  .sidebar:hover .nav-group-label { height: auto; opacity: 1; }
+}
+@media (hover: none) and (min-width: 60.0625rem) {
+  .nav-group-label { height: auto; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-group-label { transition: none; }
+}
+
+/* As a bar, the groups run across rather than down and the headings go: there
+ * is no room for four of them, and the separators alone keep the clustering. */
+@media (max-width: 60rem) {
+  .sidebar .nav-group { flex-direction: row; align-items: center; }
+  .nav-group-label { display: none; }
+  .nav-rule {
+    height: 1.1rem; width: 1px;
+    margin: 0 0.35rem 0 0.1rem;
+  }
+}
+
 .nav a {
-  display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
-  padding: 0.4rem 0.5rem;
+  /* The positioning context for the collapsed badge dot below. Without it the
+   * dot resolves against .sidebar — which *is* positioned — and all three land
+   * in the same spot near the brand instead of on their own glyph. */
+  position: relative;
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.45rem 0.5rem;
   border-radius: var(--radius);
   color: var(--text);
   text-decoration: none;
+  white-space: nowrap;
 }
+.nav-icon { flex: none; display: grid; place-items: center; width: 1.25rem; }
+.nav-icon .icon { display: block; }
+.nav-label { flex: 1; min-width: 0; }
 .nav a:hover { background: var(--surface-sunken); }
 .nav a[aria-current="page"] { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
 .nav .count {
+  flex: none;
   font: 600 11px/1 var(--mono);
   padding: 0.2rem 0.35rem;
   border-radius: 999px;
   background: var(--warn-weak); color: var(--warn);
+}
+/* Collapsed, the number will not fit beside a glyph, so the badge becomes a dot
+ * against the icon's corner — enough to say "something here", with the count
+ * itself in the bell. */
+.nav .count { position: relative; }
+.sidebar:not(:hover):not(:focus-within) .nav .count {
+  position: absolute;
+  top: 0.3rem; left: 1.55rem;
+  width: 7px; height: 7px; padding: 0;
+  border-radius: 999px;
+  background: var(--warn);
+}
+@media (max-width: 60rem) {
+  .sidebar .nav .count { position: relative; inset: auto; width: auto; height: auto; padding: 0.2rem 0.35rem; background: var(--warn-weak); }
+}
+@media (hover: none) and (min-width: 60.0625rem) {
+  .sidebar .nav .count { position: relative; inset: auto; width: auto; height: auto; padding: 0.2rem 0.35rem; background: var(--warn-weak); }
+}
+
+/* --- the top bar ----------------------------------------------------------- */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.5rem 1.5rem;
+  min-height: 3rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.shell.with-banner .topbar { top: 2.4rem; }
+/* Where you are. The page's own <h1> says it too, but that scrolls away and
+ * this does not, which matters on a table twelve screens long. */
+.topbar-where {
+  flex: 1; min-width: 0;
+  font-weight: 600; font-size: 13px;
+  color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.topbar-btn {
+  position: relative;
+  flex: none;
+  display: grid; place-items: center;
+  width: 2.1rem; height: 2.1rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.topbar-btn:hover { background: var(--surface-sunken); color: var(--text); }
+.topbar-btn[aria-expanded="true"] { background: var(--surface-sunken); color: var(--text); border-color: var(--border); }
+.topbar-btn.avatar-btn { width: auto; height: auto; }
+
+/* The count rides the bell rather than sitting beside it, so the bar's width
+ * does not change as work arrives. */
+.topbar-count {
+  position: absolute;
+  top: -1px; right: -1px;
+  min-width: 15px; height: 15px;
+  padding: 0 3px;
+  display: grid; place-items: center;
+  border-radius: 999px;
+  background: var(--warn); color: var(--bg);
+  font: 700 10px/1 var(--mono);
+}
+
+.avatar {
+  display: grid; place-items: center;
+  width: 2.1rem; height: 2.1rem;
+  border-radius: 999px;
+  /* --hue is set per account in AccountMenu, so two colleagues signed in on the
+   * same machine are told apart by colour before they read the address. */
+  background: hsl(var(--hue, 220) 62% 92%);
+  color: hsl(var(--hue, 220) 70% 28%);
+  font: 700 11px/1 var(--mono);
+  letter-spacing: 0.02em;
+}
+:root[data-theme="dark"] .avatar,
+html:not([data-theme="light"]) .avatar {
+  background: hsl(var(--hue, 220) 45% 26%);
+  color: hsl(var(--hue, 220) 70% 86%);
+}
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .avatar {
+    background: hsl(var(--hue, 220) 62% 92%);
+    color: hsl(var(--hue, 220) 70% 28%);
+  }
+}
+
+/* --- popovers -------------------------------------------------------------- */
+
+.popover-wrap { position: relative; flex: none; }
+.popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 40;
+  min-width: 15rem;
+  max-width: min(21rem, calc(100vw - 2rem));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg, 0 8px 30px rgb(0 0 0 / 0.18));
+  overflow: hidden;
+}
+.popover.end { right: 0; }
+.popover.start { left: 0; }
+
+.popover-head { padding: 0.7rem 0.8rem; border-bottom: 1px solid var(--border); }
+.popover-title {
+  font-weight: 600; font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.popover-head .muted { font-size: 12px; }
+
+.popover-section { padding: 0.35rem; }
+.popover-section + .popover-section { border-top: 1px solid var(--border); }
+.popover-label {
+  padding: 0.3rem 0.45rem 0.2rem;
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.popover-item {
+  width: 100%;
+  display: flex; align-items: center; gap: 0.55rem;
+  padding: 0.42rem 0.45rem;
+  border: 0; border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit; font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.popover-item:hover { background: var(--surface-sunken); }
+.popover-item.danger { color: var(--danger); }
+.popover-item.wrap { align-items: flex-start; }
+.popover-item small { display: block; font-size: 11px; margin-top: 1px; }
+.popover-item-icon {
+  flex: none; width: 1.1rem;
+  display: grid; place-items: center;
+  color: var(--text-muted);
+}
+.popover-item.danger .popover-item-icon { color: var(--danger); }
+.popover-item-count {
+  flex: none;
+  min-width: 1.4rem;
+  padding: 0.15rem 0.3rem;
+  border-radius: var(--radius);
+  background: var(--warn-weak); color: var(--warn);
+  font: 700 12px/1.3 var(--mono);
+  text-align: center;
+}
+
+.popover-foot {
+  padding: 0.5rem 0.8rem;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
 }
 
 .main { padding: 1.25rem 1.5rem 3rem; min-width: 0; }

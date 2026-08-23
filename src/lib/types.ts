@@ -49,7 +49,21 @@ export interface Context {
   profile_id?: string
 }
 
+/* Who is signed in, as distinct from what they may do.
+ *
+ * Every Context is a role and none of them names the account holding it. That
+ * was enough while the only thing on screen was "Signed in as Super Admin", and
+ * not enough for an avatar: several people share a role here and impersonation
+ * borrows one, so the role alone never answers whose actions these are.
+ */
+export interface Account {
+  user_id: string
+  email?: string
+  phone?: string
+}
+
 export interface LoginResult {
+  account: Account
   token: {
     access_token: string
     token_type: string

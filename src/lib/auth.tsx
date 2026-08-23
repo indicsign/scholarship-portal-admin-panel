@@ -23,6 +23,7 @@ import type { LoginResult, Role } from './types'
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
     status: 'loading',
+    account: null,
     context: null,
     contexts: [],
     impersonation: null,
@@ -48,7 +49,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // the difference between one clear sentence and a wall of failures.
       api.setAccessToken(null)
       setState({
-        status: 'anonymous', context: null, contexts: [], impersonation: null,
+        status: 'anonymous', account: null, context: null, contexts: [],
+        impersonation: null,
         error: 'This account does not have access to the admin panel. '
              + 'Sign in to the portal for your organisation instead.',
       })
@@ -64,6 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (result.must_change_password) {
       setState({
         status: 'must_set_password',
+        account: result.account,
         context: result.active_context,
         contexts: result.contexts,
         impersonation: null,
@@ -74,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setState({
       status: 'authenticated',
+      account: result.account,
       context: result.active_context,
       contexts: result.contexts,
       impersonation: null,
@@ -94,7 +98,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     pending.current = null
     if (impersonationTimer.current) window.clearTimeout(impersonationTimer.current)
     setState({
-      status: 'anonymous', context: null, contexts: [], impersonation: null, error: null,
+      status: 'anonymous', account: null, context: null, contexts: [],
+      impersonation: null, error: null,
     })
   }, [])
 
@@ -123,7 +128,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api.setAuthLostHandler(() => {
       api.setAccessToken(null)
       setState({
-        status: 'anonymous', context: null, contexts: [], impersonation: null,
+        status: 'anonymous', account: null, context: null, contexts: [],
+        impersonation: null,
         error: 'Your session has ended. Please sign in again.',
       })
     })

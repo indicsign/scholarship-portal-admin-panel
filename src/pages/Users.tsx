@@ -15,13 +15,18 @@ import type { PlatformUser, Role } from '../lib/types'
  * Split into three because the three are governed differently, not because a
  * long list wanted breaking up:
  *
- *   Platform       people who run the platform. Created here, and the only
- *                  place platform scope is granted.
- *   Organisations  people who act for a tenant. The role belongs to the
- *                  membership, so it is always paired with an organisation.
- *   Students       people the platform exists for. Never created here — a
- *                  student registers themselves and builds a profile — so this
- *                  tab reads and suspends, and offers no way to add one.
+ *   Platform              people who run the platform. Created here, and the
+ *                         only place platform scope is granted.
+ *   Organisation members  people who act for a tenant. The role belongs to the
+ *                         membership, so it is always paired with an
+ *                         organisation. Named for the people rather than the
+ *                         organisations because the sidebar's Organisations
+ *                         section is the register of tenants, which is a
+ *                         different screen answering a different question.
+ *   Students              people the platform exists for. Never created here —
+ *                         a student registers themselves and builds a profile —
+ *                         so this tab reads and suspends, and offers no way to
+ *                         add one.
  *
  * Only the super admin reaches any of it. Platform staff and compliance officers
  * find an account from Support access and cannot change what it may do. That is
@@ -65,7 +70,12 @@ type Tab = 'platform' | 'organisation' | 'student'
 
 const TABS: { id: Tab; label: string; hint: string }[] = [
   { id: 'platform', label: 'Platform', hint: 'Super admins, staff and compliance officers.' },
-  { id: 'organisation', label: 'Organisations',
+  /* "Organisation members", not "Organisations". The sidebar has an
+     Organisations section and it is a different thing — the register of tenants
+     and the queue for approving them. This tab is the people who act for one,
+     which is why it sits beside Platform and Students: all three are categories
+     of person. */
+  { id: 'organisation', label: 'Organisation members',
     hint: 'People acting for an NGO, a company, a department or a private body.' },
   { id: 'student', label: 'Students', hint: 'Applicants. They register themselves.' },
 ]
@@ -309,7 +319,7 @@ function AddDialog({
   // does not", which is the only way to add an organisation that has not
   // registered itself — and the super admin choosing it is the approval.
   const [orgType, setOrgType] = useState('')
-  const [role, setRole] = useState<Role>(kind === 'platform' ? 'STAFF' : 'NGO_CASE_WORKER')
+  const [role, setRole] = useState<Role>(kind === 'platform' ? 'STAFF' : 'NGO')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // The API answers a validation failure with a message *and* a map of which

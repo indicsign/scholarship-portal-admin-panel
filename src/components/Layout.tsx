@@ -3,8 +3,13 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../lib/auth-context'
 import { roleLabel } from '../lib/roles'
-import ThemeControl from './ThemeControl'
+import AccountMenu from './AccountMenu'
+import NotificationBell from './NotificationBell'
 import { Dialog } from './ui'
+import {
+  IconAudit, IconDashboard, IconDataRequests, IconEcosystem, IconGrievances,
+  IconMessages, IconOrganisations, IconSlides, IconSupport, IconUsers,
+} from './icons'
 import { focusPrimaryFilter, useShortcuts, type Shortcut } from '../lib/shortcuts'
 
 /* The shell.
@@ -13,42 +18,118 @@ import { focusPrimaryFilter, useShortcuts, type Shortcut } from '../lib/shortcut
  * user can jump between them, and the skip link is the first tab stop on every
  * page so a keyboard user is not walked through the whole sidebar to reach the
  * table they came for.
+ *
+ * Two things about its shape, both of which used to be otherwise:
+ *
+ * The sidebar is an icon rail that widens when a pointer or the keyboard
+ * reaches it. It widens as an overlay, over the content rather than pushing it,
+ * because these screens are wide tables and reflowing one under the reader's
+ * cursor every time they cross the left edge would be worse than any width it
+ * won back.
+ *
+ * The account cluster is in the top bar. It was the foot of the sidebar — a
+ * theme select, "Signed in as", Sign out, and a "?" — which cost about 170px of
+ * height and was what made ten sections scroll. The rail saves width; moving
+ * this saved the height.
  */
 
 /* One list, read by the sidebar, the shortcuts and the document title. Three
- * copies of the same four routes is how a section ends up navigable by keyboard
- * but missing from the menu. */
+ * copies of the same routes is how a section ends up navigable by keyboard but
+ * missing from the menu.
+ *
+ * Grouped, because ten peers is not a structure. Read as a flat column,
+ * "Slides" and "Data requests" carry the same weight, and nothing tells a new
+ * operator that three of these ten are queues with a clock running while two
+ * are read-only and three are governance. The grouping is by what the operator
+ * is doing, not by subject matter:
+ *
+ *   Overview     read-only. Nothing here is a decision.
+ *   Decisions    a queue with a deadline, ending in an act with consequences —
+ *                admitting a party to sensitive data, answering a statutory
+ *                right, resolving a complaint about somebody who cannot be
+ *                trusted to notice it themselves. These are the daily job.
+ *   Published    copy that reaches people who are not in this room.
+ *   Oversight    who did what, borrowing an identity, and who may do anything
+ *                at all.
+ *
+ * The groups earn their keep twice over. Expanded they are headings; collapsed
+ * to the rail they become hairlines, so the column reads as clusters of 2, 3, 2
+ * and 3 rather than ten interchangeable glyphs — and position memory works far
+ * better on four clusters than on a list of ten.
+ */
 type Section = {
   to: string
   label: string
   key: string
+  /** The rail's glyph. See icons.tsx on why these carry their labels anyway. */
+  Icon: (p: { className?: string }) => React.ReactElement
   /** Hidden unless the caller is the platform super admin. */
   superAdminOnly?: boolean
 }
 
-const SECTIONS: Section[] = [
-  { to: '/dashboard', label: 'Dashboard', key: 'd' },
-  { to: '/organisations', label: 'Organisations', key: 'o' },
-  { to: '/ecosystem', label: 'Ecosystem', key: 'e' },
-  { to: '/data-requests', label: 'Data requests', key: 'r' },
-  { to: '/grievances', label: 'Grievances', key: 'g' },
-  { to: '/messages', label: 'Messages', key: 'm' },
-  { to: '/slides', label: 'Slides', key: 'l' },
-  { to: '/audit', label: 'Audit trail', key: 'a' },
-  { to: '/support', label: 'Support access', key: 's' },
-  // Only the super admin administers accounts, so only they are offered the
-  // link. Showing it to platform staff would be offering a door that answers
-  // 403 — the route and the service refuse it either way.
-  { to: '/users', label: 'User management', key: 'u', superAdminOnly: true },
-] as const
+type Group = {
+  /** Shown while the rail is open; a separator line while it is collapsed. */
+  label: string
+  sections: Section[]
+}
+
+const GROUPS: Group[] = [
+  {
+    label: 'Overview',
+    sections: [
+      { to: '/dashboard', label: 'Dashboard', key: 'd', Icon: IconDashboard },
+      { to: '/ecosystem', label: 'Ecosystem', key: 'e', Icon: IconEcosystem },
+    ],
+  },
+  {
+    label: 'Decisions',
+    sections: [
+      { to: '/organisations', label: 'Organisations', key: 'o', Icon: IconOrganisations },
+      { to: '/data-requests', label: 'Data requests', key: 'r', Icon: IconDataRequests },
+      { to: '/grievances', label: 'Grievances', key: 'g', Icon: IconGrievances },
+    ],
+  },
+  {
+    label: 'Published',
+    sections: [
+      { to: '/messages', label: 'Messages', key: 'm', Icon: IconMessages },
+      { to: '/slides', label: 'Slides', key: 'l', Icon: IconSlides },
+    ],
+  },
+  {
+    label: 'Oversight',
+    sections: [
+      { to: '/audit', label: 'Audit trail', key: 'a', Icon: IconAudit },
+      { to: '/support', label: 'Support access', key: 's', Icon: IconSupport },
+      // Only the super admin administers accounts, so only they are offered the
+      // link. Showing it to platform staff would be offering a door that answers
+      // 403 — the route and the service refuse it either way.
+      { to: '/users', label: 'User management', key: 'u', Icon: IconUsers, superAdminOnly: true },
+    ],
+  },
+]
 
 interface Props {
   pendingOrganisations?: number
   openDataRequests?: number
+  /* Overdue only, not every open grievance. A badge that always reads 40-odd is
+   * a badge nobody looks at; this is the number the screen is sorted by. */
+  overdueGrievances?: number
 }
 
-export default function Layout({ pendingOrganisations, openDataRequests }: Props) {
-  const { context, impersonation, signOut, endImpersonation } = useAuth()
+/** Read out after the count, so the announcement is a sentence. */
+function countHint(to: string) {
+  switch (to) {
+    case '/organisations': return 'awaiting approval'
+    case '/data-requests': return 'waiting on a decision'
+    default: return 'past due'
+  }
+}
+
+export default function Layout({
+  pendingOrganisations, openDataRequests, overdueGrievances,
+}: Props) {
+  const { context, impersonation, endImpersonation } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -62,12 +143,30 @@ export default function Layout({ pendingOrganisations, openDataRequests }: Props
   // Memoised because the document-title effect below depends on it: a fresh
   // array every render would re-run that effect every render, and it also moves
   // focus to <main>.
-  const sections = useMemo(
-    () => SECTIONS.filter(
-      s => !s.superAdminOnly || context?.role === 'SUPER_ADMIN',
-    ),
+  /* Filtered once, and both shapes kept: the sidebar walks the groups, while
+   * the shortcuts and the title lookup want a flat list. A section the caller
+   * may not reach must disappear from the shortcuts too, or `g u` would
+   * navigate to a screen that refuses.
+   *
+   * A group whose every section is filtered out drops with them — an empty
+   * heading with a separator under it reads as a section that failed to load.
+   *
+   * Memoised because the document-title effect below depends on the flat list:
+   * a fresh array every render would re-run that effect every render, and it
+   * also moves focus to <main>. */
+  const groups = useMemo(
+    () => GROUPS
+      .map(g => ({
+        ...g,
+        sections: g.sections.filter(
+          s => !s.superAdminOnly || context?.role === 'SUPER_ADMIN',
+        ),
+      }))
+      .filter(g => g.sections.length > 0),
     [context?.role],
   )
+
+  const sections = useMemo(() => groups.flatMap(g => g.sections), [groups])
 
   const shortcuts: Shortcut[] = [
     ...sections.map(s => ({
@@ -110,67 +209,78 @@ export default function Layout({ pendingOrganisations, openDataRequests }: Props
       {impersonation && <ImpersonationBanner onEnd={endImpersonation} />}
 
       <div className={`shell${impersonation ? ' with-banner' : ''}`}>
+        {/* aria-label rather than a heading: the brand is decorative here and
+            "Sections" is what a screen-reader user needs to hear when they jump
+            to this landmark. */}
         <nav className="sidebar" aria-label="Sections">
           <div className="brand">
-            Scholarship Platform
-            <small>Admin panel</small>
+            <span className="brand-mark" aria-hidden="true">SP</span>
+            <span className="brand-text">
+              Scholarship Platform
+              <small>Admin panel</small>
+            </span>
           </div>
 
           <div className="nav">
-            {sections.map(s => {
-              const count = s.to === '/organisations' ? pendingOrganisations
-                : s.to === '/data-requests' ? openDataRequests
-                  : 0
-              return (
-                <NavLink key={s.to} to={s.to}>
-                  <span>{s.label}</span>
-                  {!!count && (
-                    <span className="count">
-                      {count}
-                      <span className="sr-only">
-                        {s.to === '/organisations' ? ' awaiting approval' : ' waiting on a decision'}
-                      </span>
-                    </span>
-                  )}
-                </NavLink>
-              )
-            })}
-          </div>
+            {groups.map((group, i) => (
+              <div className="nav-group" key={group.label}>
+                {/* aria-hidden, and the links are not wrapped in a nested list:
+                    the heading is a visual grouping, and announcing "Decisions,
+                    group, 3 items" before every link is more noise than help
+                    when the link's own label already says where it goes. The
+                    hairline for the collapsed rail is this element's border, so
+                    it is drawn even when the words are not readable. */}
+                {i > 0 && <span className="nav-rule" aria-hidden="true" />}
+                <div className="nav-group-label" aria-hidden="true">{group.label}</div>
 
-          <div className="sidebar-foot">
-            <ThemeControl />
-
-            <div className="whoami">
-              <div className="muted">Signed in as</div>
-              <div style={{ fontWeight: 600 }}>{roleLabel(context?.role ?? '')}</div>
-            </div>
-
-            <div className="row">
-              <button className="subtle sm" onClick={signOut} style={{ flex: 1 }}>
-                Sign out
-              </button>
-              {/* Discoverability. A shortcut nobody knows about is a shortcut
-                  nobody uses, and this is the only affordance that says the
-                  keyboard does anything here. */}
-              <button
-                className="subtle sm"
-                onClick={() => setHelpOpen(true)}
-                aria-haspopup="dialog"
-                title="Keyboard shortcuts"
-              >
-                <span aria-hidden="true">?</span>
-                <span className="sr-only">Keyboard shortcuts</span>
-              </button>
-            </div>
+                {group.sections.map(s => {
+                  const count = s.to === '/organisations' ? pendingOrganisations
+                    : s.to === '/data-requests' ? openDataRequests
+                      : s.to === '/grievances' ? overdueGrievances
+                        : 0
+                  return (
+                    /* title, so a pointer resting on a collapsed glyph gets the
+                       label from the platform even before the rail widens. */
+                    <NavLink key={s.to} to={s.to} title={s.label}>
+                      <span className="nav-icon"><s.Icon /></span>
+                      <span className="nav-label">{s.label}</span>
+                      {!!count && (
+                        <span className="count">
+                          <span className="count-n">{count}</span>
+                          <span className="sr-only">{` ${countHint(s.to)}`}</span>
+                        </span>
+                      )}
+                    </NavLink>
+                  )
+                })}
+              </div>
+            ))}
           </div>
         </nav>
 
-        {/* tabIndex -1 so the skip link and the route change above can move
-            focus here, which is what makes both do anything for a
-            screen-reader user rather than only scrolling the page. */}
-        <main className="main" id="main" tabIndex={-1} ref={mainRef}>
-          <Outlet />
-        </main>
+        <div className="col">
+          {/* The top bar is inside the content column, not across the whole
+              shell, so the widening rail overlays it like everything else
+              rather than having to be laid out around. */}
+          <header className="topbar">
+            <div className="topbar-where">
+              {sections.find(s => s.to === location.pathname)?.label ?? 'Admin panel'}
+            </div>
+            <NotificationBell
+              pendingOrganisations={pendingOrganisations}
+              openDataRequests={openDataRequests}
+              overdueGrievances={overdueGrievances}
+            />
+            <AccountMenu onShortcuts={() => setHelpOpen(true)} />
+          </header>
+
+          {/* tabIndex -1 so the skip link and the route change above can move
+              focus here, which is what makes both do anything for a
+              screen-reader user rather than only scrolling the page. */}
+          <main className="main" id="main" tabIndex={-1} ref={mainRef}>
+            <Outlet />
+          </main>
+        </div>
       </div>
 
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} shortcuts={shortcuts} />

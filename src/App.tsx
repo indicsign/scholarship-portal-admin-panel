@@ -39,9 +39,13 @@ export default function App() {
 }
 
 function AuthenticatedApp() {
-  // Fetched once at the shell so the sidebar can show how many organisations
-  // are waiting. It is the panel's only genuinely time-sensitive number, and an
-  // approval queue nobody looks at is the failure mode this guards against.
+  /* The three queues in the Decisions group, counted once at the shell.
+   *
+   * All three share a failure mode — nobody looks — and all three run against a
+   * clock, which is what earns them a number in the sidebar while the other
+   * seven sections get none. Each asks for a single row and reads meta.total,
+   * so the cost is three counts rather than three pages of records.
+   */
   const pending = useQuery<Organisation[]>(
     signal => api.get('/admin/organisations', {
       status: 'PENDING_APPROVAL', page_size: 1,
@@ -49,13 +53,20 @@ function AuthenticatedApp() {
     [],
   )
 
-  // The other queue with somebody waiting at the end of it. A data request
-  // runs against a statutory clock, so it earns a count in the sidebar for the
-  // same reason the approval queue does: the failure mode is nobody looking.
   const dataRequests = useQuery<unknown[]>(
     signal => api.get('/admin/data-requests', {
       status: 'RECEIVED', page_size: 1,
     }, signal),
+    [],
+  )
+
+  /* Overdue, not open. The grievance queue is sorted by breach and was the one
+   * of the three carrying no count, because until now the API could only filter
+   * by status — and a badge showing every open grievance would sit at forty-odd
+   * permanently, which is a badge nobody reads. `overdue=true` counts the ones
+   * past the date the student was promised. */
+  const grievances = useQuery<unknown[]>(
+    signal => api.get('/grievances', { overdue: 'true', page_size: 1 }, signal),
     [],
   )
 
@@ -65,6 +76,7 @@ function AuthenticatedApp() {
         <Layout
           pendingOrganisations={pending.meta?.total ?? 0}
           openDataRequests={dataRequests.meta?.total ?? 0}
+          overdueGrievances={grievances.meta?.total ?? 0}
         />
       }>
         {/* The dashboard is the landing screen: the first question an

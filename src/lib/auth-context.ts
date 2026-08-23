@@ -1,12 +1,14 @@
 import { createContext, useContext } from 'react'
 
-import type { Context, Role } from './types'
+import type { Account, Context, Role } from './types'
 
 export interface AuthState {
   /* must_set_password sits between the two: the session is real and the token is
    installed, but the password used was issued by an administrator and expires,
    so nothing else is offered until one of their own is chosen. */
   status: 'loading' | 'anonymous' | 'mfa_required' | 'must_set_password' | 'authenticated'
+  /** The signed-in account. Null whenever there is no session to name. */
+  account: Account | null
   context: Context | null
   contexts: Context[]
   /** Set while acting as another user; drives the banner and the End control. */
