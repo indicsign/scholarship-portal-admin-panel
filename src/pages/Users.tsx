@@ -7,7 +7,7 @@ import { date, humanise } from '../lib/format'
 import { Dialog, Empty, ErrorState, Field, Loading, Pill, StatusPill } from '../components/ui'
 import { useDebounced, useQuery } from '../lib/hooks'
 import { useAnnounce } from '../lib/announce'
-import { PLATFORM_ROLES } from '../lib/roles'
+import { PLATFORM_ROLES, roleLabel } from '../lib/roles'
 import type { PlatformUser, Role } from '../lib/types'
 
 /* User management.
@@ -84,7 +84,7 @@ export default function Users() {
   // Guarded here as well as on the route. A super admin whose role is revoked
   // mid-session keeps a token that still claims it until it expires, and this is
   // better than a screen full of 403s.
-  if (context?.role !== 'PLATFORM_SUPER_ADMIN') {
+  if (context?.role !== 'SUPER_ADMIN') {
     return (
       <div className="card">
         <Empty
@@ -213,7 +213,7 @@ export default function Users() {
                                 key={`${r.role}:${r.organisation_id ?? 'platform'}`}
                                 tone={r.organisation_id ? 'neutral' : 'accent'}
                               >
-                                {humanise(r.role)}
+                                {roleLabel(r.role)}
                               </Pill>
                             ))}
                           </div>
@@ -306,7 +306,7 @@ function AddDialog({
   // does not", which is the only way to add an organisation that has not
   // registered itself — and the super admin choosing it is the approval.
   const [orgType, setOrgType] = useState('')
-  const [role, setRole] = useState<Role>(kind === 'platform' ? 'PLATFORM_STAFF' : 'NGO_CASE_WORKER')
+  const [role, setRole] = useState<Role>(kind === 'platform' ? 'STAFF' : 'NGO_CASE_WORKER')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // The API answers a validation failure with a message *and* a map of which
@@ -335,7 +335,7 @@ function AddDialog({
         organisation: kind === 'organisation' ? org.trim() : undefined,
         organisation_type: kind === 'organisation' && orgType ? orgType : undefined,
       })
-      onDone(`${email} added as ${humanise(role).toLowerCase()}. A temporary password has been emailed.`)
+      onDone(`${email} added as ${roleLabel(role).toLowerCase()}. A temporary password has been emailed.`)
     } catch (err) {
       if (err instanceof ApiError && err.fields) setFields(err.fields)
       setError(err instanceof Error ? err.message : 'It could not be saved.')
@@ -373,7 +373,7 @@ function AddDialog({
         </div>
       )}
 
-      {role === 'PLATFORM_SUPER_ADMIN' && (
+      {role === 'SUPER_ADMIN' && (
         <div className="alert warn">
           <p>
             A super admin can manage every account on the platform, including
@@ -482,7 +482,7 @@ function RolesDialog({
   onChanged: (message: string) => void
   onDone: () => void
 }) {
-  const [role, setRole] = useState<Role>('PLATFORM_STAFF')
+  const [role, setRole] = useState<Role>('STAFF')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -522,16 +522,16 @@ function RolesDialog({
         <ul className="plain">
           {platform.map(r => (
             <li key={r.role} className="row-between">
-              <span>{humanise(r.role)}</span>
+              <span>{roleLabel(r.role)}</span>
               <button
                 className="sm danger"
                 disabled={busy}
                 onClick={() => run(
                   () => api.del(`/admin/accounts/${user.user_id}/platform-roles/${r.role}`),
-                  `${humanise(r.role)} taken away from ${who}.`,
+                  `${roleLabel(r.role)} taken away from ${who}.`,
                 )}
               >
-                Revoke<span className="sr-only"> {humanise(r.role)}</span>
+                Revoke<span className="sr-only"> {roleLabel(r.role)}</span>
               </button>
             </li>
           ))}
@@ -552,7 +552,7 @@ function RolesDialog({
             disabled={busy}
             onClick={() => run(
               () => api.post(`/admin/accounts/${user.user_id}/platform-roles`, { role }),
-              `${who} is now ${humanise(role).toLowerCase()}.`,
+              `${who} is now ${roleLabel(role).toLowerCase()}.`,
             )}
           >
             {busy ? 'Saving…' : 'Grant it'}
@@ -572,7 +572,7 @@ function RolesDialog({
       ) : (
         <ul className="plain">
           {organisational.map(r => (
-            <li key={r.membership_id}>{humanise(r.role)} · {r.organisation_name}</li>
+            <li key={r.membership_id}>{roleLabel(r.role)} · {r.organisation_name}</li>
           ))}
         </ul>
       )}

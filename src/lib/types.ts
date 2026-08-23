@@ -6,9 +6,11 @@
  */
 
 export type Role =
-  | 'PLATFORM_SUPER_ADMIN'
-  | 'PLATFORM_STAFF'
-  | 'COMPLIANCE_OFFICER'
+  | 'SUPER_ADMIN'
+  | 'ADMIN'
+  | 'TECHNICAL'
+  | 'STAFF'
+  | 'COMPLIANCE'
   | 'STUDENT'
   | 'GUARDIAN'
   | 'NGO_ADMIN' | 'NGO_CASE_WORKER' | 'NGO_VERIFIER'
@@ -57,6 +59,8 @@ export interface LoginResult {
   active_context: Context
   /** The token issued is good only for completing the second-factor challenge. */
   mfa_required?: boolean
+  /** The password used was issued by an administrator and expires. */
+  must_change_password?: boolean
   language?: string
 }
 

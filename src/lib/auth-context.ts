@@ -3,7 +3,10 @@ import { createContext, useContext } from 'react'
 import type { Context, Role } from './types'
 
 export interface AuthState {
-  status: 'loading' | 'anonymous' | 'mfa_required' | 'authenticated'
+  /* must_set_password sits between the two: the session is real and the token is
+   installed, but the password used was issued by an administrator and expires,
+   so nothing else is offered until one of their own is chosen. */
+  status: 'loading' | 'anonymous' | 'mfa_required' | 'must_set_password' | 'authenticated'
   context: Context | null
   contexts: Context[]
   /** Set while acting as another user; drives the banner and the End control. */
@@ -13,6 +16,8 @@ export interface AuthState {
 
 export interface AuthApi extends AuthState {
   signIn(identifier: string, password: string, mfaCode?: string): Promise<void>
+  /** Replaces a temporary password. No current password: see SetInitialPassword. */
+  setPassword(newPassword: string): Promise<void>
   signOut(): Promise<void>
   startImpersonation(targetUserId: string, reason: string): Promise<void>
   endImpersonation(): Promise<void>

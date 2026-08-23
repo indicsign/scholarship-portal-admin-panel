@@ -40,7 +40,7 @@ export default function Messages() {
 
   // A template edit reaches every student the next time anything is sent, so
   // it is the super admin's alone.
-  const canEdit = can('PLATFORM_SUPER_ADMIN')
+  const canEdit = can('SUPER_ADMIN')
 
   if (query.loading && !query.data) return <Loading label="Loading messages" />
   if (query.error) return <ErrorState error={query.error} onRetry={query.reload} />

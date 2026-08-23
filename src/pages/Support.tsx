@@ -29,7 +29,7 @@ export default function Support() {
   const search = useDebounced(term, 350)
   const [target, setTarget] = useState<UserSummary | null>(null)
 
-  const canImpersonate = can('PLATFORM_SUPER_ADMIN', 'PLATFORM_STAFF')
+  const canImpersonate = can('SUPER_ADMIN', 'STAFF')
 
   const query = useQuery<UserSummary[]>(
     signal => search.length >= 3

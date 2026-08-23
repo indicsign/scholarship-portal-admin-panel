@@ -44,7 +44,7 @@ export default function Organisations() {
   // Only the Super Admin admits or refuses an organisation (Table 3.1). Staff
   // and compliance officers see the queue but cannot act on it, so the controls
   // are absent rather than present-and-failing.
-  const canDecide = can('PLATFORM_SUPER_ADMIN')
+  const canDecide = can('SUPER_ADMIN')
 
   return (
     <>

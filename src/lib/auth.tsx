@@ -57,6 +57,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     api.setAccessToken(result.token.access_token)
     pending.current = null
+
+    // The token is installed first: the session is genuine, and the password
+    // form needs it to authenticate the change. What is withheld is the rest of
+    // the application, not the session.
+    if (result.must_change_password) {
+      setState({
+        status: 'must_set_password',
+        context: result.active_context,
+        contexts: result.contexts,
+        impersonation: null,
+        error: null,
+      })
+      return
+    }
+
     setState({
       status: 'authenticated',
       context: result.active_context,
@@ -64,6 +79,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       impersonation: null,
       error: null,
     })
+  }, [])
+
+  const setPassword = useCallback(async (newPassword: string) => {
+    await api.post('/auth/password/initial', { new_password: newPassword })
+    // The account no longer owes a change, so the rest of the application opens.
+    // No re-login: setting a password revokes other sessions, not this one.
+    setState(s => ({ ...s, status: 'authenticated', error: null }))
   }, [])
 
   const signOut = useCallback(async () => {
@@ -176,8 +198,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const value = useMemo<AuthApi>(
-    () => ({ ...state, signIn, signOut, startImpersonation, endImpersonation, can }),
-    [state, signIn, signOut, startImpersonation, endImpersonation, can],
+    () => ({ ...state, signIn, setPassword, signOut, startImpersonation, endImpersonation, can }),
+    [state, signIn, setPassword, signOut, startImpersonation, endImpersonation, can],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

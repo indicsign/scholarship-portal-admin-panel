@@ -66,7 +66,7 @@ export default function DataRequests() {
   // Erasing and declining are Super Admin only, matching the route guard.
   // Support staff and compliance officers read the queue and cannot act on it,
   // so the controls are absent rather than present and failing.
-  const canAct = can('PLATFORM_SUPER_ADMIN')
+  const canAct = can('SUPER_ADMIN')
 
   return (
     <>

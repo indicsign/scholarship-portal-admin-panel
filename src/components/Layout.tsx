@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../lib/auth-context'
+import { roleLabel } from '../lib/roles'
 import ThemeControl from './ThemeControl'
 import { Dialog } from './ui'
-import { humanise } from '../lib/format'
 import { focusPrimaryFilter, useShortcuts, type Shortcut } from '../lib/shortcuts'
 
 /* The shell.
@@ -64,7 +64,7 @@ export default function Layout({ pendingOrganisations, openDataRequests }: Props
   // focus to <main>.
   const sections = useMemo(
     () => SECTIONS.filter(
-      s => !s.superAdminOnly || context?.role === 'PLATFORM_SUPER_ADMIN',
+      s => !s.superAdminOnly || context?.role === 'SUPER_ADMIN',
     ),
     [context?.role],
   )
@@ -142,7 +142,7 @@ export default function Layout({ pendingOrganisations, openDataRequests }: Props
 
             <div className="whoami">
               <div className="muted">Signed in as</div>
-              <div style={{ fontWeight: 600 }}>{humanise(context?.role ?? '')}</div>
+              <div style={{ fontWeight: 600 }}>{roleLabel(context?.role ?? '')}</div>
             </div>
 
             <div className="row">
@@ -223,7 +223,7 @@ function ImpersonationBanner({ onEnd }: { onEnd: () => void }) {
       <span aria-hidden="true">●</span>
       <span>
         Support session — you are acting as{' '}
-        <strong>{humanise(impersonation.actingAs.role)}</strong>. Everything you
+        <strong>{roleLabel(impersonation.actingAs.role)}</strong>. Everything you
         do is recorded and will be disclosed to them.
       </span>
       <span className="spacer" />

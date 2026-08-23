@@ -51,7 +51,7 @@ export default function Grievances() {
 
   // Compliance officers read the trail and do not work the queue; Table 3.1
   // gives handling to the super admin and to support staff.
-  const canHandle = can('PLATFORM_SUPER_ADMIN', 'PLATFORM_STAFF')
+  const canHandle = can('SUPER_ADMIN', 'STAFF')
 
   return (
     <>

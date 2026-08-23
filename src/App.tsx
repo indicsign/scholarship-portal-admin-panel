@@ -12,6 +12,7 @@ import Grievances from './pages/Grievances'
 import Messages from './pages/Messages'
 import Ecosystem from './pages/Ecosystem'
 import Login from './pages/Login'
+import SetPassword from './pages/SetPassword'
 import Users from './pages/Users'
 import Organisations from './pages/Organisations'
 import Slides from './pages/Slides'
@@ -27,6 +28,10 @@ export default function App() {
   if (status === 'loading') {
     return <main id="main" className="login"><Loading label="Restoring your session" /></main>
   }
+
+  // A real session that owes a password. Placed before the anonymous check so
+  // the sign-in form is not shown to somebody who is already signed in.
+  if (status === 'must_set_password') return <SetPassword />
 
   if (status !== 'authenticated') return <Login />
 

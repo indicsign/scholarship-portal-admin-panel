@@ -55,7 +55,7 @@ export default function Login() {
         <div className="body">
           <h1>Admin panel</h1>
           <p className="lede">
-            Scholarship Platform · platform operators only
+            Indic AI Scholarship Platform · platform operators only
           </p>
 
           {error && <div className="alert danger" role="alert">{error}</div>}
