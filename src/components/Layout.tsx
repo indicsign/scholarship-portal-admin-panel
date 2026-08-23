@@ -39,7 +39,7 @@ const SECTIONS: Section[] = [
   // Only the super admin administers accounts, so only they are offered the
   // link. Showing it to platform staff would be offering a door that answers
   // 403 — the route and the service refuse it either way.
-  { to: '/accounts', label: 'Accounts', key: 'u', superAdminOnly: true },
+  { to: '/users', label: 'User management', key: 'u', superAdminOnly: true },
 ] as const
 
 interface Props {

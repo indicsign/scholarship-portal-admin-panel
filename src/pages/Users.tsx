@@ -6,67 +6,84 @@ import { date, humanise } from '../lib/format'
 import { Dialog, Empty, ErrorState, Field, Loading, Pill, StatusPill } from '../components/ui'
 import { useDebounced, useQuery } from '../lib/hooks'
 import { useAnnounce } from '../lib/announce'
-import type { PlatformUser, Role } from '../lib/types'
+import { PLATFORM_ROLES, rolesFor } from '../lib/roles'
+import type { Organisation, OrgType, PlatformUser, Role } from '../lib/types'
 
-/* Accounts across the whole platform.
+/* User management.
  *
- * Only the super admin reaches this screen. Platform staff and compliance
- * officers can read accounts elsewhere — Support access finds one for a support
- * session — and neither may create one or change what it may do. Granting
- * authority is the single act in this system that is not delegable by everyone
- * who holds it, and it is refused in three places: the route guard, the identity
- * service, and the policy on platform_role in the database.
+ * Split into three because the three are governed differently, not because a
+ * long list wanted breaking up:
  *
- * Nothing here deletes. "Remove" deactivates: an account is named by every
- * application it filed and every entry in the audit trail, and removing the row
+ *   Platform       people who run the platform. Created here, and the only
+ *                  place platform scope is granted.
+ *   Organisations  people who act for a tenant. The role belongs to the
+ *                  membership, so it is always paired with an organisation.
+ *   Students       people the platform exists for. Never created here — a
+ *                  student registers themselves and builds a profile — so this
+ *                  tab reads and suspends, and offers no way to add one.
+ *
+ * Only the super admin reaches any of it. Platform staff and compliance officers
+ * find an account from Support access and cannot change what it may do. That is
+ * refused in the route guard, in the identity service, and by the policy on
+ * platform_role in the database.
+ *
+ * Nothing here deletes. Remove deactivates: an account is named by every
+ * application it filed and every entry in the audit trail, and dropping the row
  * would either fail on those references or take the history with it. Erasing a
- * person is a data request, answering a legal right rather than an
+ * person is a data request, which answers a legal right rather than an
  * administrator's convenience.
  */
 
-const PLATFORM_ROLES: Role[] = ['PLATFORM_SUPER_ADMIN', 'PLATFORM_STAFF', 'COMPLIANCE_OFFICER']
+type Tab = 'platform' | 'organisation' | 'student'
 
-export default function Accounts() {
+const TABS: { id: Tab; label: string; hint: string }[] = [
+  { id: 'platform', label: 'Platform', hint: 'Super admins, staff and compliance officers.' },
+  { id: 'organisation', label: 'Organisations', hint: 'People acting for an NGO, a company or a department.' },
+  { id: 'student', label: 'Students', hint: 'Applicants. They register themselves.' },
+]
+
+export default function Users() {
   const { context } = useAuth()
   const announce = useAnnounce()
+  const [tab, setTab] = useState<Tab>('platform')
   const [q, setQ] = useState('')
   const search = useDebounced(q)
-  const [creating, setCreating] = useState(false)
+  const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<PlatformUser | null>(null)
 
   const query = useQuery<PlatformUser[]>(
-    signal => api.get('/admin/accounts', { q: search, limit: 50 }, signal),
-    [search],
+    signal => api.get('/admin/accounts', { q: search, kind: tab, limit: 50 }, signal),
+    [search, tab],
   )
 
-  // Guarding the screen as well as the route. A super admin who loses the role
-  // mid-session keeps a token that still says otherwise until it expires, and
-  // this is what they should see rather than a wall of 403s.
+  // Guarded here as well as on the route. A super admin whose role is revoked
+  // mid-session keeps a token that still claims it until it expires, and this is
+  // better than a screen full of 403s.
   if (context?.role !== 'PLATFORM_SUPER_ADMIN') {
     return (
       <div className="card">
         <Empty
-          title="Only the super admin administers accounts"
-          hint="You can find an account from Support access."
+          title="Only the super admin manages users"
+          hint="You can look an account up from Support access."
         />
       </div>
     )
   }
+
+  const current = TABS.find(t => t.id === tab)!
 
   async function act(u: PlatformUser, what: 'suspend' | 'reinstate' | 'remove') {
     const who = u.email ?? u.phone ?? 'that account'
     try {
       if (what === 'remove') {
         await api.del(`/admin/accounts/${u.user_id}`)
-        announce(`${who} has been deactivated. Its roles and sessions are gone.`, 'warn')
+        announce(`${who} is deactivated. Every role and session is gone.`, 'warn')
       } else {
         await api.patch(`/admin/accounts/${u.user_id}`, {
           status: what === 'suspend' ? 'SUSPENDED' : 'ACTIVE',
         })
         announce(
-          what === 'suspend'
-            ? `${who} is suspended and signed out.`
-            : `${who} can sign in again.`,
+          what === 'suspend' ? `${who} is suspended and signed out.` : `${who} can sign in again.`,
           what === 'suspend' ? 'warn' : 'ok',
         )
       }
@@ -80,14 +97,31 @@ export default function Accounts() {
     <>
       <div className="page-head">
         <div>
-          <h1>Accounts</h1>
-          <p>
-            Every account on the platform and what each one may do. Suspending
-            somebody signs them out at once; deactivating also stands down every
-            role they hold.
-          </p>
+          <h1>User management</h1>
+          <p>{current.hint}</p>
         </div>
-        <button className="primary" onClick={() => setCreating(true)}>Add an account</button>
+        {/* Students are not created here. They register, verify a contact
+          * channel and build a profile — an account made from this side would
+          * have no profile and the portal would have nowhere to send them. */}
+        {tab !== 'student' && (
+          <button className="primary" onClick={() => setAdding(true)}>
+            {tab === 'platform' ? 'Add to platform' : 'Add to an organisation'}
+          </button>
+        )}
+      </div>
+
+      <div className="tabs" role="tablist" aria-label="Kind of user">
+        {TABS.map(t => (
+          <button
+            key={t.id}
+            role="tab"
+            aria-selected={tab === t.id}
+            className={tab === t.id ? 'tab active' : 'tab'}
+            onClick={() => { setTab(t.id); setEditing(null) }}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       <div className="card">
@@ -104,11 +138,11 @@ export default function Accounts() {
           )}
         </Field>
 
-        {query.loading && !query.data && <Loading label="Loading accounts" />}
+        {query.loading && !query.data && <Loading label="Loading users" />}
         {query.error ? <ErrorState error={query.error} onRetry={query.reload} /> : null}
         {query.data && query.data.length === 0 && (
           <Empty
-            title={search ? 'Nothing matches that' : 'No accounts'}
+            title={search ? 'Nothing matches that' : `No ${current.label.toLowerCase()} users`}
             hint={search ? 'Try part of an email address.' : undefined}
           />
         )}
@@ -116,11 +150,12 @@ export default function Accounts() {
         {!!query.data?.length && (
           <div className="table-wrap">
             <table>
-              <caption className="sr-only">Accounts on the platform</caption>
+              <caption className="sr-only">{current.label} users</caption>
               <thead>
                 <tr>
-                  <th scope="col">Account</th>
-                  <th scope="col">What they may do</th>
+                  <th scope="col">Name or contact</th>
+                  <th scope="col">Role</th>
+                  {tab === 'organisation' && <th scope="col">Organisation</th>}
                   <th scope="col">Status</th>
                   <th scope="col">Last signed in</th>
                   <th scope="col"><span className="sr-only">Actions</span></th>
@@ -128,12 +163,11 @@ export default function Accounts() {
               </thead>
               <tbody>
                 {query.data.map(u => {
-                  // No client-side "is this me" check: the session context
-                  // carries a role, not a user id. The service refuses an
-                  // operator suspending or deactivating their own account and
-                  // says so plainly, which is the same protection without the
-                  // client guessing at identity.
                   const dead = u.status === 'DEACTIVATED'
+                  const roles = u.roles.filter(r =>
+                    tab === 'platform' ? !r.organisation_id
+                      : tab === 'organisation' ? r.organisation_id
+                        : true)
                   return (
                     <tr key={u.user_id}>
                       <th scope="row" style={{ fontWeight: 600 }}>
@@ -145,48 +179,52 @@ export default function Accounts() {
                         )}
                       </th>
                       <td>
-                        {u.roles.length === 0 ? (
-                          <span className="faint">Nothing — a student or an unused account</span>
+                        {roles.length === 0 ? (
+                          <span className="faint">{tab === 'student' ? 'Student' : 'None'}</span>
                         ) : (
                           <div className="pill-row">
-                            {u.roles.map(r => (
+                            {roles.map(r => (
                               <Pill
                                 key={`${r.role}:${r.organisation_id ?? 'platform'}`}
                                 tone={r.organisation_id ? 'neutral' : 'accent'}
                               >
                                 {humanise(r.role)}
-                                {r.organisation_name ? ` · ${r.organisation_name}` : ''}
                               </Pill>
                             ))}
                           </div>
                         )}
                       </td>
+                      {tab === 'organisation' && (
+                        <td>
+                          {roles.map(r => r.organisation_name).filter(Boolean).join(', ') || '—'}
+                        </td>
+                      )}
                       <td><StatusPill status={u.status} /></td>
                       <td className="nowrap">
-                        {u.last_login_at ? date(u.last_login_at) : <span className="faint">never</span>}
+                        {u.last_login_at ? date(u.last_login_at)
+                          : <span className="faint">never</span>}
                       </td>
                       <td className="actions">
-                        <button className="sm" onClick={() => setEditing(u)} disabled={dead}>
-                          Roles<span className="sr-only"> for {u.email ?? u.phone}</span>
-                        </button>
+                        {/* Roles are editable on the platform tab only. An
+                          * organisation's own administrator manages who does
+                          * what inside it, from their People screen — reaching
+                          * across into a tenant from here would put the platform
+                          * inside the boundary the whole system exists to hold. */}
+                        {tab === 'platform' && (
+                          <button className="sm" onClick={() => setEditing(u)} disabled={dead}>
+                            Roles<span className="sr-only"> for {u.email ?? u.phone}</span>
+                          </button>
+                        )}
                         {u.status === 'SUSPENDED' ? (
                           <button className="sm" onClick={() => act(u, 'reinstate')}>
                             Reinstate<span className="sr-only"> {u.email ?? u.phone}</span>
                           </button>
                         ) : (
-                          <button
-                            className="sm"
-                            onClick={() => act(u, 'suspend')}
-                            disabled={dead}
-                          >
+                          <button className="sm" onClick={() => act(u, 'suspend')} disabled={dead}>
                             Suspend<span className="sr-only"> {u.email ?? u.phone}</span>
                           </button>
                         )}
-                        <button
-                          className="sm danger"
-                          onClick={() => act(u, 'remove')}
-                          disabled={dead}
-                        >
+                        <button className="sm danger" onClick={() => act(u, 'remove')} disabled={dead}>
                           Remove<span className="sr-only"> {u.email ?? u.phone}</span>
                         </button>
                       </td>
@@ -199,11 +237,12 @@ export default function Accounts() {
         )}
       </div>
 
-      {creating && (
-        <CreateDialog
-          onClose={() => setCreating(false)}
+      {adding && (
+        <AddDialog
+          kind={tab === 'platform' ? 'platform' : 'organisation'}
+          onClose={() => setAdding(false)}
           onDone={msg => {
-            setCreating(false)
+            setAdding(false)
             announce(msg, 'ok')
             query.reload()
           }}
@@ -214,10 +253,7 @@ export default function Accounts() {
         <RolesDialog
           user={editing}
           onClose={() => setEditing(null)}
-          onChanged={msg => {
-            announce(msg, 'ok')
-            query.reload()
-          }}
+          onChanged={msg => { announce(msg, 'ok'); query.reload() }}
           onDone={() => setEditing(null)}
         />
       )}
@@ -225,29 +261,51 @@ export default function Accounts() {
   )
 }
 
-/* Creating an account.
+/* Adding a user.
  *
  * One role, not a set. An account that needs several is created and then granted
- * the rest, so each grant is its own entry in the audit trail instead of a list
+ * the rest, so each grant is its own line in the audit trail rather than a list
  * buried inside one.
  */
-function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: (m: string) => void }) {
+function AddDialog({
+  kind, onClose, onDone,
+}: {
+  kind: 'platform' | 'organisation'
+  onClose: () => void
+  onDone: (message: string) => void
+}) {
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
-  const [role, setRole] = useState<Role>('PLATFORM_STAFF')
+  const [orgID, setOrgID] = useState('')
+  const [role, setRole] = useState<Role>(kind === 'platform' ? 'PLATFORM_STAFF' : 'NGO_CASE_WORKER')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Only platform roles are offered here. An organisational role needs an
-  // organisation, and the person who knows which one is that organisation's own
-  // administrator — who adds colleagues from their own People screen, where the
-  // roles on offer are already the right ones for their type.
+  // Only approved organisations. A pending one has no administrator yet and no
+  // scholarships, so a member added to it could do nothing.
+  const orgs = useQuery<Organisation[]>(
+    signal => kind === 'organisation'
+      ? api.get('/admin/organisations', { status: 'APPROVED', page_size: 200 }, signal)
+      : Promise.resolve({ data: [] as Organisation[] } as never),
+    [kind],
+  )
+
+  const chosen = orgs.data?.find(o => o.organisation_id === orgID)
+  const orgRoles = rolesFor(chosen?.org_type as OrgType | undefined)
+  const roles = kind === 'platform' ? PLATFORM_ROLES : orgRoles
+  const ready = !!email && (kind === 'platform' || (!!orgID && !!role))
+
   async function save() {
     setBusy(true)
     setError(null)
     try {
-      await api.post('/admin/accounts', { email, phone: phone || undefined, role })
-      onDone(`${email} created as ${humanise(role).toLowerCase()}. A temporary password has been emailed.`)
+      await api.post('/admin/accounts', {
+        email,
+        phone: phone || undefined,
+        role,
+        organisation_id: kind === 'organisation' ? orgID : undefined,
+      })
+      onDone(`${email} added as ${humanise(role).toLowerCase()}. A temporary password has been emailed.`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'It could not be saved.')
     } finally {
@@ -258,13 +316,13 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: (m: st
   return (
     <Dialog
       open
-      title="Add an account"
+      title={kind === 'platform' ? 'Add someone to the platform' : 'Add someone to an organisation'}
       onClose={onClose}
       footer={
         <>
           <button onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="primary" onClick={save} disabled={busy || !email}>
-            {busy ? 'Saving…' : 'Create it'}
+          <button className="primary" onClick={save} disabled={busy || !ready}>
+            {busy ? 'Saving…' : 'Create the account'}
           </button>
         </>
       }
@@ -274,7 +332,7 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: (m: st
       {role === 'PLATFORM_SUPER_ADMIN' && (
         <div className="alert warn">
           <p>
-            A super admin can administer every account on the platform, including
+            A super admin can manage every account on the platform, including
             yours, and can grant this same role to anybody else.
           </p>
         </div>
@@ -293,29 +351,56 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: (m: st
         )}
       </Field>
 
-      <Field label="What may they do?" required>
+      {kind === 'organisation' && (
+        <Field label="Organisation" required hint="Which tenant this role is held in.">
+          {props => (
+            <select
+              {...props}
+              value={orgID}
+              onChange={e => {
+                setOrgID(e.target.value)
+                // The roles depend on the type, so a stale choice from the
+                // previous organisation must not survive the change.
+                const next = orgs.data?.find(o => o.organisation_id === e.target.value)
+                const allowed = rolesFor(next?.org_type as OrgType | undefined)
+                if (allowed.length) setRole(allowed[0])
+              }}
+            >
+              <option value="">Choose one…</option>
+              {orgs.data?.map(o => (
+                <option key={o.organisation_id} value={o.organisation_id}>
+                  {o.name} — {humanise(o.org_type)}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+      )}
+
+      <Field
+        label="Role"
+        required
+        hint={kind === 'organisation'
+          ? 'Only the three that exist inside an organisation of that type.'
+          : undefined}
+      >
         {props => (
-          <select {...props} value={role} onChange={e => setRole(e.target.value as Role)}>
-            {PLATFORM_ROLES.map(r => <option key={r} value={r}>{humanise(r)}</option>)}
+          <select
+            {...props}
+            value={role}
+            onChange={e => setRole(e.target.value as Role)}
+            disabled={kind === 'organisation' && !orgID}
+          >
+            {roles.length === 0 && <option value="">Choose an organisation first</option>}
+            {roles.map(r => <option key={r} value={r}>{humanise(r)}</option>)}
           </select>
         )}
       </Field>
-
-      <p className="faint">
-        To give somebody a role inside an organisation, their organisation's own
-        administrator adds them from People — only that screen knows which roles
-        that type of organisation can hold.
-      </p>
     </Dialog>
   )
 }
 
-/* Granting and revoking platform scope on an existing account.
- *
- * Organisational roles are shown but not editable here. They belong to a tenant,
- * and reaching across into one to change who does what there would put the
- * platform inside a boundary the whole system exists to hold.
- */
+/* Granting and revoking platform scope on an existing account. */
 function RolesDialog({
   user, onClose, onChanged, onDone,
 }: {
@@ -404,7 +489,7 @@ function RolesDialog({
 
       {user.status !== 'ACTIVE' && (
         <p className="faint">
-          Only an active account can be given a platform role. Reinstate it first.
+          Only an active account can hold a platform role. Reinstate it first.
         </p>
       )}
 
@@ -414,9 +499,7 @@ function RolesDialog({
       ) : (
         <ul className="plain">
           {organisational.map(r => (
-            <li key={r.membership_id}>
-              {humanise(r.role)} · {r.organisation_name}
-            </li>
+            <li key={r.membership_id}>{humanise(r.role)} · {r.organisation_name}</li>
           ))}
         </ul>
       )}

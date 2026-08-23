@@ -394,6 +394,62 @@ td.actions { white-space: nowrap; text-align: right; }
 .pill.danger  { background: var(--danger-weak); color: var(--danger); border-color: currentColor; }
 .pill.accent  { background: var(--accent-weak); color: var(--accent); border-color: currentColor; }
 
+/* --- tabs ------------------------------------------------------------------------
+ *
+ * A tablist, not links: the three groups are one screen showing different rows,
+ * so the URL does not change and the back button does not become a way to
+ * accidentally re-run a filter. The selected one is marked by weight and an
+ * underline as well as colour, so it survives monochrome and colour blindness.
+ */
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1rem;
+  overflow-x: auto;
+}
+
+.tab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 0.5rem 0.75rem;
+  font: 600 13px/1.4 var(--font);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab:hover { color: var(--text); }
+
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* Several pills in one cell wrap rather than widening the column past the
+ * 320px reflow floor the responsive check enforces. */
+.pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+/* A list of things each with a control beside it. */
+ul.plain { list-style: none; margin: 0.25rem 0 1rem; padding: 0; }
+ul.plain > li { padding: 0.35rem 0; border-bottom: 1px solid var(--border); }
+ul.plain > li:last-child { border-bottom: 0; }
+
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 /* --- controls --------------------------------------------------------------------- */
 
 button, .btn {
