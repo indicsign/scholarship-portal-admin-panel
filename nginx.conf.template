@@ -130,6 +130,25 @@ server {
         # overwrite it rather than pass it through.
         proxy_set_header X-Forwarded-Proto $scheme;
 
+
+        # Cloudflare refuses a request that already carries its own
+        # CF-Connecting-IP and answers 403 with its error page — it reads an
+        # inbound one as a spoof, since only Cloudflare is supposed to set it.
+        # Both this panel and the API sit behind Cloudflare, so the header the
+        # edge added on the way in would be forwarded straight back to the edge
+        # on the way out, and every proxied call fails. Verified header by
+        # header: CF-Connecting-IP alone produces the 403; CF-Ray, CF-IPCountry,
+        # CF-Visitor and CDN-Loop all pass. The rest are cleared anyway, because
+        # they describe the browser's hop to this panel and say nothing true
+        # about this container's hop to the API.
+        #
+        # An empty value removes the header rather than sending it blank.
+        proxy_set_header CF-Connecting-IP "";
+        proxy_set_header CF-Ray           "";
+        proxy_set_header CF-IPCountry     "";
+        proxy_set_header CF-Visitor       "";
+        proxy_set_header CDN-Loop         "";
+
         # Long enough for a report export, short enough that a wedged upstream
         # is not held open indefinitely.
         proxy_connect_timeout 5s;
@@ -145,6 +164,9 @@ server {
         set $api_health ${API_TARGET};
         proxy_pass $api_health$request_uri;
         proxy_set_header Host ${API_HOST};
+        # Same reason as the /api/ block above.
+        proxy_set_header CF-Connecting-IP "";
+        proxy_set_header CF-Ray           "";
         proxy_ssl_server_name on;
     }
 
@@ -152,6 +174,9 @@ server {
         set $api_ready ${API_TARGET};
         proxy_pass $api_ready$request_uri;
         proxy_set_header Host ${API_HOST};
+        # Same reason as the /api/ block above.
+        proxy_set_header CF-Connecting-IP "";
+        proxy_set_header CF-Ray           "";
         proxy_ssl_server_name on;
     }
 
