@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../lib/auth-context'
@@ -58,8 +58,15 @@ export default function Layout({ pendingOrganisations, openDataRequests }: Props
 
   // Filtered once. A section the caller may not reach must disappear from the
   // keyboard shortcuts too, or `g u` would navigate to a screen that refuses.
-  const sections = SECTIONS.filter(
-    s => !s.superAdminOnly || context?.role === 'PLATFORM_SUPER_ADMIN',
+  //
+  // Memoised because the document-title effect below depends on it: a fresh
+  // array every render would re-run that effect every render, and it also moves
+  // focus to <main>.
+  const sections = useMemo(
+    () => SECTIONS.filter(
+      s => !s.superAdminOnly || context?.role === 'PLATFORM_SUPER_ADMIN',
+    ),
+    [context?.role],
   )
 
   const shortcuts: Shortcut[] = [
@@ -94,7 +101,7 @@ export default function Layout({ pendingOrganisations, openDataRequests }: Props
       return
     }
     mainRef.current?.focus()
-  }, [location.pathname])
+  }, [location.pathname, sections])
 
   return (
     <>

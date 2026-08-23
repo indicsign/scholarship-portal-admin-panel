@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import * as api from '../lib/api'
+import { ApiError } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import { date, humanise } from '../lib/format'
 import { Dialog, Empty, ErrorState, Field, Loading, Pill, StatusPill } from '../components/ui'
@@ -50,6 +51,13 @@ import type { PlatformUser, Role } from '../lib/types'
 const ORG_ROLES: Role[] = [
   'NGO_ADMIN', 'CORPORATE_ADMIN', 'GOVT_DEPARTMENT_ADMIN',
 ]
+
+/** The one admin role each organisation type can hold. */
+const ADMIN_ROLE_FOR: Record<string, Role | undefined> = {
+  NGO: 'NGO_ADMIN',
+  CORPORATE: 'CORPORATE_ADMIN',
+  GOVERNMENT: 'GOVT_DEPARTMENT_ADMIN',
+}
 
 type Tab = 'platform' | 'organisation' | 'student'
 
@@ -294,9 +302,18 @@ function AddDialog({
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [org, setOrg] = useState('')
+  // Empty means "it must already exist". Choosing a type says "create it if it
+  // does not", which is the only way to add an organisation that has not
+  // registered itself — and the super admin choosing it is the approval.
+  const [orgType, setOrgType] = useState('')
   const [role, setRole] = useState<Role>(kind === 'platform' ? 'PLATFORM_STAFF' : 'NGO_CASE_WORKER')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The API answers a validation failure with a message *and* a map of which
+  // field failed and why. Showing only the message leaves "some of the details
+  // need attention" on screen with nothing saying which detail, which is no
+  // better than saying nothing.
+  const [fields, setFields] = useState<Record<string, string>>({})
 
   // Typed, not chosen from a list, so nothing here knows the organisation's
   // type until the server resolves the name. The three admin roles are offered
@@ -309,15 +326,18 @@ function AddDialog({
   async function save() {
     setBusy(true)
     setError(null)
+    setFields({})
     try {
       await api.post('/admin/accounts', {
         email,
         phone: phone || undefined,
         role,
         organisation: kind === 'organisation' ? org.trim() : undefined,
+        organisation_type: kind === 'organisation' && orgType ? orgType : undefined,
       })
       onDone(`${email} added as ${humanise(role).toLowerCase()}. A temporary password has been emailed.`)
     } catch (err) {
+      if (err instanceof ApiError && err.fields) setFields(err.fields)
       setError(err instanceof Error ? err.message : 'It could not be saved.')
     } finally {
       setBusy(false)
@@ -342,6 +362,17 @@ function AddDialog({
     >
       {error && <div className="alert danger" role="alert">{error}</div>}
 
+      {kind === 'organisation' && orgType && org.trim() && (
+        <div className="alert warn">
+          <p>
+            No approved organisation is named “{org.trim()}”, so it will be
+            created as {orgType === 'GOVERNMENT' ? 'a government department'
+              : orgType === 'CORPORATE' ? 'a company' : 'an NGO'} and approved,
+            with this person as its administrator. They then add their own staff.
+          </p>
+        </div>
+      )}
+
       {role === 'PLATFORM_SUPER_ADMIN' && (
         <div className="alert warn">
           <p>
@@ -351,14 +382,23 @@ function AddDialog({
         </div>
       )}
 
-      <Field label="Email address" required hint="Where the temporary password and every sign-in code go.">
+      <Field
+        label="Email address"
+        required
+        error={fields.email}
+        hint="Where the temporary password and every sign-in code go."
+      >
         {props => (
           <input {...props} type="email" autoComplete="off" value={email}
             onChange={e => setEmail(e.target.value)} />
         )}
       </Field>
 
-      <Field label="Mobile number" hint="Optional. Used for notices, not for signing in.">
+      <Field
+        label="Mobile number"
+        error={fields.phone}
+        hint="Optional. An Indian mobile number, used for notices, not for signing in."
+      >
         {props => (
           <input {...props} type="tel" value={phone} onChange={e => setPhone(e.target.value)} />
         )}
@@ -368,6 +408,7 @@ function AddDialog({
         <Field
           label="Organisation"
           required
+          error={fields.organisation}
           hint="Its name, exactly as it appears on the Organisations screen. An identifier works too."
         >
           {props => (
@@ -383,9 +424,37 @@ function AddDialog({
         </Field>
       )}
 
+      {kind === 'organisation' && (
+        <Field
+          label="If it does not exist yet, create it as"
+          error={fields.organisation_type}
+          hint="Leave blank to require an organisation that is already approved."
+        >
+          {props => (
+            <select
+              {...props}
+              value={orgType}
+              onChange={e => {
+                setOrgType(e.target.value)
+                // The admin role is decided by the type, so keep the two in
+                // step rather than letting a mismatch be submitted.
+                const forType = ADMIN_ROLE_FOR[e.target.value]
+                if (forType) setRole(forType)
+              }}
+            >
+              <option value="">It already exists</option>
+              <option value="NGO">NGO</option>
+              <option value="CORPORATE">Corporate</option>
+              <option value="GOVERNMENT">Government department</option>
+            </select>
+          )}
+        </Field>
+      )}
+
       <Field
         label="Role"
         required
+        error={fields.role}
         hint={kind === 'organisation'
           ? 'Administrators only. They add their own staff from their People screen.'
           : undefined}
