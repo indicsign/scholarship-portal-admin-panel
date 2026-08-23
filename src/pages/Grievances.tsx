@@ -3,7 +3,8 @@ import { useState } from 'react'
 import * as api from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import { humanise, relative, timestamp } from '../lib/format'
-import { Dialog, Empty, ErrorState, Field, Loading, Pager, Pill } from '../components/ui'
+import { Empty, ErrorState, Field, Loading, Pager, Pill } from '../components/ui'
+import SplitView, { DetailEmpty, QueueItem } from '../components/SplitView'
 import { useQuery } from '../lib/hooks'
 import { useAnnounce } from '../lib/announce'
 import type { Grievance, GrievanceHandler } from '../lib/types'
@@ -20,6 +21,12 @@ import type { Grievance, GrievanceHandler } from '../lib/types'
  * The queue is therefore ordered by breach rather than by arrival. `due_at` has
  * been on the table since the beginning with a comment saying the admin panel
  * would queue against it; this is that.
+ *
+ * The complaint sits beside the queue rather than inside a modal. That mattered
+ * more here than on any other screen: this detail is a conversation — the
+ * student's own words, then every message since — and a thread in a modal is
+ * read once and dismissed. Beside the list it stays open while the answer is
+ * written, and moving to the next grievance does not mean closing this one.
  */
 
 const STATUSES = ['OPEN', 'IN_PROGRESS', 'ESCALATED', 'RESOLVED', 'CLOSED'] as const
@@ -37,7 +44,10 @@ export default function Grievances() {
 
   const [status, setStatus] = useState<string>('OPEN')
   const [page, setPage] = useState(1)
-  const [open, setOpen] = useState<Grievance | null>(null)
+  /* The reference last clicked, not the row object. Holding the row would pin a
+   * copy that the next reload makes stale — an overdue flag that has since been
+   * resolved, a status that has moved on. */
+  const [wantID, setWantID] = useState<string | null>(null)
 
   const query = useQuery<Grievance[]>(
     signal => api.get('/grievances', { status, page, page_size: 25 }, signal),
@@ -48,6 +58,17 @@ export default function Grievances() {
     signal => api.get('/admin/grievances/handlers', undefined, signal),
     [],
   )
+
+  const rows = query.data ?? []
+
+  /* Derived while rendering, so the pane can never show a grievance the list no
+   * longer holds — resolving one drops it out of the OPEN filter. Falling back
+   * to the first row also means the next complaint is up as soon as this one is
+   * answered. */
+  const selected = rows.find(g => g.grievance_id === wantID) ?? rows[0] ?? null
+  const selectedID = selected?.grievance_id ?? null
+  /* An actual click, which is what swaps the panes when only one fits. */
+  const opened = !!wantID
 
   // Compliance officers read the trail and do not work the queue; Table 3.1
   // gives handling to the super admin and to support staff.
@@ -73,89 +94,74 @@ export default function Grievances() {
         </div>
       )}
 
-      <div className="card">
-        <header>
-          <div className="filters">
-            <div className="field">
-              <label htmlFor="f-status">Status</label>
-              <select
-                id="f-status"
-                data-primary-filter
-                value={status}
-                onChange={e => { setStatus(e.target.value); setPage(1) }}
+      <SplitView
+        showDetailOnNarrow={opened}
+        onBack={() => setWantID(null)}
+        backLabel="Back to the queue"
+        list={
+          <>
+            <header>
+              <div className="filters">
+                <div className="field">
+                  <label htmlFor="f-status">Status</label>
+                  <select
+                    id="f-status"
+                    data-primary-filter
+                    value={status}
+                    onChange={e => { setStatus(e.target.value); setPage(1) }}
+                  >
+                    <option value="">All</option>
+                    {STATUSES.map(s => (
+                      <option key={s} value={s}>{humanise(s)}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </header>
+
+            {query.loading && !query.data && <Loading label="Loading grievances" />}
+            {query.error ? <ErrorState error={query.error} onRetry={query.reload} /> : null}
+
+            {query.data && rows.length === 0 && !query.stale && (
+              <Empty
+                title="Nothing open"
+                hint={status === 'OPEN'
+                  ? 'No student is waiting on an answer.'
+                  : 'No grievances match this filter.'}
+              />
+            )}
+
+            {rows.length > 0 && (
+              <div
+                className={`split-scroll${query.stale ? ' stale' : ''}`}
+                aria-busy={query.stale || undefined}
               >
-                <option value="">All</option>
-                {STATUSES.map(s => (
-                  <option key={s} value={s}>{humanise(s)}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </header>
-
-        {query.loading && !query.data && <Loading label="Loading grievances" />}
-        {query.error ? <ErrorState error={query.error} onRetry={query.reload} /> : null}
-
-        {query.data && query.data.length === 0 && !query.stale && (
-          <Empty
-            title="Nothing open"
-            hint={status === 'OPEN'
-              ? 'No student is waiting on an answer.'
-              : 'No grievances match this filter.'}
-          />
-        )}
-
-        {query.data && query.data.length > 0 && (
-          <div className={query.stale ? 'stale' : undefined} aria-busy={query.stale || undefined}>
-            <div className="table-wrap">
-              <table>
-                <caption className="sr-only">
-                  Grievances, overdue and unresolved first
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Reference</th>
-                    <th scope="col">Subject</th>
-                    <th scope="col">About</th>
-                    <th scope="col">Raised</th>
-                    <th scope="col">Status</th>
-                    <th scope="col"><span className="sr-only">Actions</span></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {query.data.map(g => (
-                    <tr key={g.grievance_id}>
-                      <th scope="row" className="mono nowrap">{g.reference_code}</th>
-                      <td>
-                        {g.subject}
-                        <div className="faint" style={{ fontSize: 12 }}>
-                          {humanise(g.category)}
-                        </div>
-                      </td>
-                      <td className="truncate">
-                        {g.organisation_name ?? <span className="faint">the platform</span>}
-                      </td>
-                      <td className="nowrap">
-                        {relative(g.created_at)}
-                        {g.overdue && (
-                          <div><Pill tone="danger">Past due</Pill></div>
-                        )}
-                      </td>
-                      <td>
-                        <Pill tone={toneFor(g.status, g.overdue)}>{humanise(g.status)}</Pill>
-                      </td>
-                      <td className="actions">
-                        <button className="sm" onClick={() => setOpen(g)}>
-                          Open<span className="sr-only"> {g.reference_code}</span>
-                        </button>
-                      </td>
-                    </tr>
+                <ul className="queue">
+                  {rows.map(g => (
+                    <QueueItem
+                      key={g.grievance_id}
+                      name={g.subject}
+                      sub={[
+                        g.reference_code,
+                        humanise(g.category),
+                        g.organisation_name ?? 'the platform',
+                        relative(g.created_at),
+                      ].join(' · ')}
+                      /* Past due wins the slot when both apply. The status is in
+                         the pane; which of these is breached is the only thing
+                         worth scanning a column of fifty for. */
+                      side={g.overdue
+                        ? <Pill tone="danger">Past due</Pill>
+                        : <Pill tone={toneFor(g.status, g.overdue)}>{humanise(g.status)}</Pill>}
+                      selected={g.grievance_id === selectedID}
+                      onSelect={() => setWantID(g.grievance_id)}
+                    />
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </ul>
+              </div>
+            )}
 
-            {query.meta && (
+            {query.meta && rows.length > 0 && (
               <Pager
                 page={query.meta.page}
                 pageSize={query.meta.page_size}
@@ -164,20 +170,24 @@ export default function Grievances() {
                 onPage={setPage}
               />
             )}
-          </div>
-        )}
-      </div>
-
-      <GrievanceDialog
-        grievance={open}
-        handlers={handlers.data ?? []}
-        canHandle={canHandle}
-        onClose={() => setOpen(null)}
-        onDone={message => {
-          setOpen(null)
-          announce(message)
-          query.reload()
-        }}
+          </>
+        }
+        detail={
+          selected ? (
+            <Detail
+              key={selected.grievance_id}
+              grievance={selected}
+              handlers={handlers.data ?? []}
+              canHandle={canHandle}
+              onDone={message => {
+                announce(message)
+                query.reload()
+              }}
+            />
+          ) : (
+            <DetailEmpty hint="Choose a grievance from the queue to read it." />
+          )
+        }
       />
     </>
   )
@@ -189,13 +199,18 @@ function toneFor(status: string, overdue: boolean) {
   return 'warn' as const
 }
 
-function GrievanceDialog({
-  grievance, handlers, canHandle, onClose, onDone,
+/* One grievance, read and answered.
+ *
+ * Keyed on the grievance id by the caller, so moving to the next one discards a
+ * half-written answer rather than carrying it across. An answer composed for one
+ * student and sent to another is the failure this prevents.
+ */
+function Detail({
+  grievance, handlers, canHandle, onDone,
 }: {
-  grievance: Grievance | null
+  grievance: Grievance
   handlers: GrievanceHandler[]
   canHandle: boolean
-  onClose: () => void
   onDone: (message: string) => void
 }) {
   const [status, setStatus] = useState('RESOLVED')
@@ -204,24 +219,16 @@ function GrievanceDialog({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // The full conversation, fetched only once a grievance is opened: a list of
-  // fifty tickets should not pull fifty message threads with it.
+  /* The full conversation, fetched per grievance rather than with the list: a
+   * page of twenty-five tickets should not pull twenty-five message threads with
+   * it. The row already carries enough to render the header, so the pane is
+   * useful before this arrives. */
   const detail = useQuery<Grievance>(
-    signal => grievance
-      ? api.get(`/grievances/${grievance.grievance_id}`, undefined, signal)
-      : Promise.resolve({ data: null as unknown as Grievance }),
-    [grievance?.grievance_id ?? ''],
+    signal => api.get(`/grievances/${grievance.grievance_id}`, undefined, signal),
+    [grievance.grievance_id],
   )
 
-  function close() {
-    setResolution('')
-    setAssignee('')
-    setError(null)
-    onClose()
-  }
-
   async function assign() {
-    if (!grievance) return
     setBusy(true)
     setError(null)
     try {
@@ -238,7 +245,6 @@ function GrievanceDialog({
   }
 
   async function resolve() {
-    if (!grievance) return
     setBusy(true)
     setError(null)
     try {
@@ -255,55 +261,44 @@ function GrievanceDialog({
   const body = detail.data ?? grievance
 
   return (
-    <Dialog
-      open={!!grievance}
-      title={grievance ? `${grievance.reference_code} — ${grievance.subject}` : ''}
-      onClose={close}
-      footer={
-        <>
-          <button onClick={close} disabled={busy}>Close</button>
-          {canHandle && (
-            <button
-              className="primary"
-              onClick={resolve}
-              disabled={busy || resolution.trim().length < 10}
-            >
-              {busy ? 'Saving…' : 'Save answer'}
-            </button>
-          )}
-        </>
-      }
-    >
-      {error && <div className="alert danger" role="alert">{error}</div>}
-
-      {body && (
-        <>
-          <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-            {humanise(body.category)} · raised {relative(body.created_at)}
+    <>
+      <header>
+        <div>
+          <h2 className="detail-title">{grievance.subject}</h2>
+          <p className="detail-sub">
+            <span className="mono">{grievance.reference_code}</span>
+            {' · '}{humanise(body.category)}
+            {' · raised '}{relative(body.created_at)}
             {body.organisation_name && ` · about ${body.organisation_name}`}
             {body.due_at && ` · due ${timestamp(body.due_at)}`}
           </p>
+        </div>
+        <Pill tone={toneFor(body.status, body.overdue)}>
+          {body.overdue ? 'Past due' : humanise(body.status)}
+        </Pill>
+      </header>
 
-          {/* The student's own words, first and unabridged. An operator
-              deciding what to do needs the complaint, not a summary of it. */}
-          <blockquote className="quote">{body.description}</blockquote>
+      <div className="detail-body">
+      {error && <div className="alert danger" role="alert">{error}</div>}
 
-          {detail.loading && <Loading label="Loading the conversation" />}
+      {/* The student's own words, first and unabridged. An operator deciding
+          what to do needs the complaint, not a summary of it. */}
+      <blockquote className="quote" style={{ marginTop: 0 }}>{body.description}</blockquote>
 
-          {!!body.messages?.length && (
-            <div className="thread">
-              {body.messages.map(m => (
-                <div key={m.message_id} className={`msg${m.is_internal ? ' internal' : ''}`}>
-                  <div className="faint" style={{ fontSize: 11 }}>
-                    {m.is_internal ? 'Internal note' : m.author_self ? 'You' : 'Them'}
-                    {' · '}{relative(m.created_at)}
-                  </div>
-                  {m.body}
-                </div>
-              ))}
+      {detail.loading && <Loading label="Loading the conversation" />}
+
+      {!!body.messages?.length && (
+        <div className="thread">
+          {body.messages.map(m => (
+            <div key={m.message_id} className={`msg${m.is_internal ? ' internal' : ''}`}>
+              <div className="faint" style={{ fontSize: 11 }}>
+                {m.is_internal ? 'Internal note' : m.author_self ? 'You' : 'Them'}
+                {' · '}{relative(m.created_at)}
+              </div>
+              {m.body}
             </div>
-          )}
-        </>
+          ))}
+        </div>
       )}
 
       {canHandle && (
@@ -351,6 +346,19 @@ function GrievanceDialog({
           </Field>
         </>
       )}
-    </Dialog>
+      </div>
+
+      {canHandle && (
+        <div className="detail-actions">
+          <button
+            className="primary"
+            onClick={resolve}
+            disabled={busy || resolution.trim().length < 10}
+          >
+            {busy ? 'Saving…' : 'Send the answer'}
+          </button>
+        </div>
+      )}
+    </>
   )
 }

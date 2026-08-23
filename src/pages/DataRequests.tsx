@@ -3,7 +3,8 @@ import { useState } from 'react'
 import * as api from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import { date, relative } from '../lib/format'
-import { Dialog, Empty, ErrorState, Field, Loading, Pager, Pill } from '../components/ui'
+import { Empty, ErrorState, Field, Loading, Pager, Pill } from '../components/ui'
+import SplitView, { DetailEmpty, QueueItem } from '../components/SplitView'
 import { useQuery } from '../lib/hooks'
 import { useAnnounce } from '../lib/announce'
 import type { DataRequest, ErasureResult } from '../lib/types'
@@ -30,6 +31,13 @@ import type { DataRequest, ErasureResult } from '../lib/types'
  *
  * And a refusal needs grounds typed out. A request declined without a readable
  * reason is one the student cannot challenge, which makes the right decorative.
+ *
+ * The request sits beside the queue rather than behind a modal. Erasure keeps
+ * both of its steps — choosing it, then ticking that this is the right person —
+ * because an irreversible act should not be one click from a list. What changed
+ * is that the student's name, contact and waiting time stay on screen while the
+ * box is ticked, instead of being restated inside a dialog that had covered them
+ * up.
  */
 
 const STATUSES = [
@@ -45,10 +53,6 @@ const STATUSES = [
  * is still time to act rather than once the deadline has passed. */
 const OVERDUE_DAYS = 21
 
-type Action =
-  | { kind: 'erase'; request: DataRequest }
-  | { kind: 'reject'; request: DataRequest }
-
 export default function DataRequests() {
   const { can } = useAuth()
   const announce = useAnnounce()
@@ -56,12 +60,23 @@ export default function DataRequests() {
   const [status, setStatus] = useState<string>('RECEIVED')
   const [type, setType] = useState('')
   const [page, setPage] = useState(1)
-  const [action, setAction] = useState<Action | null>(null)
+  /* The request last clicked. An id, not the row: holding the row would pin a
+   * waiting-day count and a blocker list that the next reload makes stale. */
+  const [wantID, setWantID] = useState<string | null>(null)
 
   const query = useQuery<DataRequest[]>(
     signal => api.get('/admin/data-requests', { status, type, page, page_size: 25 }, signal),
     [status, type, page],
   )
+
+  const rows = query.data ?? []
+
+  /* Derived while rendering, so the pane cannot show a request the list no
+   * longer holds — erasing one drops it out of the Waiting filter — and the next
+   * request is up as soon as this one is dealt with. */
+  const selected = rows.find(r => r.request_id === wantID) ?? rows[0] ?? null
+  const selectedID = selected?.request_id ?? null
+  const opened = !!wantID
 
   // Erasing and declining are Super Admin only, matching the route guard.
   // Support staff and compliance officers read the queue and cannot act on it,
@@ -88,155 +103,92 @@ export default function DataRequests() {
         </div>
       )}
 
-      <div className="card">
-        <header>
-          <div className="filters">
-            <div className="field">
-              <label htmlFor="f-status">Status</label>
-              <select
-                id="f-status"
-                data-primary-filter
-                value={status}
-                onChange={e => { setStatus(e.target.value); setPage(1) }}
+      <SplitView
+        showDetailOnNarrow={opened}
+        onBack={() => setWantID(null)}
+        backLabel="Back to the queue"
+        list={
+          <>
+            <header>
+              <div className="filters">
+                <div className="field">
+                  <label htmlFor="f-status">Status</label>
+                  <select
+                    id="f-status"
+                    data-primary-filter
+                    value={status}
+                    onChange={e => { setStatus(e.target.value); setPage(1) }}
+                  >
+                    {STATUSES.map(s => (
+                      <option key={s.value} value={s.value}>{s.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="field">
+                  <label htmlFor="f-type">Kind</label>
+                  <select
+                    id="f-type"
+                    value={type}
+                    onChange={e => { setType(e.target.value); setPage(1) }}
+                  >
+                    <option value="">All</option>
+                    <option value="ERASURE">Erasure</option>
+                    <option value="EXPORT">Export</option>
+                  </select>
+                </div>
+              </div>
+            </header>
+
+            {query.loading && !query.data && <Loading label="Loading data requests" />}
+            {query.error ? <ErrorState error={query.error} onRetry={query.reload} /> : null}
+
+            {query.data && rows.length === 0 && !query.stale && (
+              <Empty
+                title="Nothing waiting"
+                hint={status === 'RECEIVED'
+                  ? 'No student is waiting on a decision about their data.'
+                  : 'No requests match these filters.'}
+              />
+            )}
+
+            {rows.length > 0 && (
+              <div
+                className={`split-scroll${query.stale ? ' stale' : ''}`}
+                aria-busy={query.stale || undefined}
               >
-                {STATUSES.map(s => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="field">
-              <label htmlFor="f-type">Kind</label>
-              <select
-                id="f-type"
-                value={type}
-                onChange={e => { setType(e.target.value); setPage(1) }}
-              >
-                <option value="">All</option>
-                <option value="ERASURE">Erasure</option>
-                <option value="EXPORT">Export</option>
-              </select>
-            </div>
-          </div>
-        </header>
-
-        {query.loading && !query.data && <Loading label="Loading data requests" />}
-        {query.error ? <ErrorState error={query.error} onRetry={query.reload} /> : null}
-
-        {query.data && query.data.length === 0 && !query.stale && (
-          <Empty
-            title="Nothing waiting"
-            hint={status === 'RECEIVED'
-              ? 'No student is waiting on a decision about their data.'
-              : 'No requests match these filters.'}
-          />
-        )}
-
-        {query.data && query.data.length > 0 && (
-          <div className={query.stale ? 'stale' : undefined} aria-busy={query.stale || undefined}>
-            <div className="table-wrap">
-              <table>
-                <caption className="sr-only">
-                  Data requests, open first and oldest within them
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Student</th>
-                    <th scope="col">Kind</th>
-                    <th scope="col">Asked</th>
-                    <th scope="col">Waiting</th>
-                    <th scope="col">Status</th>
-                    {canAct && <th scope="col"><span className="sr-only">Actions</span></th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {query.data.map(r => {
+                <ul className="queue">
+                  {rows.map(r => {
                     const open = r.status === 'RECEIVED' || r.status === 'IN_PROGRESS'
-                    const blocked = (r.blockers?.length ?? 0) > 0
                     const overdue = open && r.waiting_days >= OVERDUE_DAYS
 
                     return (
-                      <tr key={r.request_id}>
-                        <th scope="row" style={{ fontWeight: 600 }}>
-                          {r.student_name}
-                          <div className="faint" style={{ fontWeight: 400, fontSize: 12 }}>
-                            {r.contact ?? '—'}
-                          </div>
-                        </th>
-                        <td>
-                          <Pill tone={r.request_type === 'ERASURE' ? 'danger' : 'neutral'}>
-                            {r.request_type === 'ERASURE' ? 'Erasure' : 'Export'}
-                          </Pill>
-                        </td>
-                        <td className="nowrap">{date(r.requested_at)}</td>
-                        <td className="nowrap">
-                          {open ? (
-                            <>
-                              {r.waiting_days} day{r.waiting_days === 1 ? '' : 's'}
-                              {overdue && (
-                                <div>
-                                  <Pill tone="danger">Overdue</Pill>
-                                </div>
-                              )}
-                            </>
-                          ) : (
-                            <span className="faint">
-                              {r.completed_at ? relative(r.completed_at) : '—'}
-                            </span>
-                          )}
-                        </td>
-                        <td>
-                          <Pill tone={statusTone(r.status)}>{statusLabel(r.status)}</Pill>
-                          {blocked && (
-                            // Stated on the row rather than discovered on
-                            // clicking: an operator working a queue should be
-                            // able to see what is actionable without opening
-                            // each one to find out.
-                            <div className="faint" style={{ fontSize: 12 }}>
-                              Blocked — {r.blockers?.join('; ')}
-                            </div>
-                          )}
-                          {r.rejection_reason && (
-                            <div className="faint" style={{ fontSize: 12 }}>
-                              {r.rejection_reason}
-                            </div>
-                          )}
-                        </td>
-                        {canAct && (
-                          <td className="actions">
-                            {open && r.request_type === 'ERASURE' && (
-                              <div className="row" style={{ justifyContent: 'flex-end' }}>
-                                <button
-                                  className="sm danger"
-                                  disabled={blocked}
-                                  title={blocked ? r.blockers?.join('; ') : undefined}
-                                  onClick={() => setAction({ kind: 'erase', request: r })}
-                                >
-                                  Erase<span className="sr-only"> {r.student_name}'s data</span>
-                                </button>
-                                <button
-                                  className="sm"
-                                  onClick={() => setAction({ kind: 'reject', request: r })}
-                                >
-                                  Decline<span className="sr-only"> {r.student_name}'s request</span>
-                                </button>
-                              </div>
-                            )}
-                            {open && r.request_type === 'EXPORT' && (
-                              <span className="faint" style={{ fontSize: 12 }}>
-                                Assembled automatically
-                              </span>
-                            )}
-                          </td>
-                        )}
-                      </tr>
+                      <QueueItem
+                        key={r.request_id}
+                        name={r.student_name}
+                        sub={[
+                          r.request_type === 'ERASURE' ? 'Erasure' : 'Export',
+                          open
+                            ? `waiting ${r.waiting_days} day${r.waiting_days === 1 ? '' : 's'}`
+                            : r.completed_at ? relative(r.completed_at) : statusLabel(r.status),
+                        ].join(' · ')}
+                        /* The clock, not the status. A data request runs against
+                           a statutory deadline, so "has this been sitting too
+                           long" is the one thing worth scanning the column for;
+                           the status is in the pane. */
+                        side={overdue
+                          ? <Pill tone="danger">Overdue</Pill>
+                          : <Pill tone={statusTone(r.status)}>{statusLabel(r.status)}</Pill>}
+                        selected={r.request_id === selectedID}
+                        onSelect={() => setWantID(r.request_id)}
+                      />
                     )
                   })}
-                </tbody>
-              </table>
-            </div>
+                </ul>
+              </div>
+            )}
 
-            {query.meta && (
+            {query.meta && rows.length > 0 && (
               <Pager
                 page={query.meta.page}
                 pageSize={query.meta.page_size}
@@ -245,18 +197,23 @@ export default function DataRequests() {
                 onPage={setPage}
               />
             )}
-          </div>
-        )}
-      </div>
-
-      <ActionDialog
-        action={action}
-        onClose={() => setAction(null)}
-        onDone={(message, tone) => {
-          setAction(null)
-          announce(message, tone)
-          query.reload()
-        }}
+          </>
+        }
+        detail={
+          selected ? (
+            <Detail
+              key={selected.request_id}
+              request={selected}
+              canAct={canAct}
+              onDone={(message, tone) => {
+                announce(message, tone)
+                query.reload()
+              }}
+            />
+          ) : (
+            <DetailEmpty hint="Choose a request from the queue to see what it asks for." />
+          )
+        }
       />
     </>
   )
@@ -275,35 +232,43 @@ function statusLabel(s: DataRequest['status']) {
         : 'Declined'
 }
 
-function ActionDialog({
-  action, onClose, onDone,
+/* One request, and what may be done about it.
+ *
+ * Keyed on the request id by the caller, so choosing a different student
+ * discards a ticked confirmation box and a half-typed refusal. A confirmation
+ * carried from one erasure to another is the mistake with no undo.
+ */
+function Detail({
+  request: r, canAct, onDone,
 }: {
-  action: Action | null
-  onClose: () => void
+  request: DataRequest
+  canAct: boolean
   onDone: (message: string, tone: 'ok' | 'warn' | 'danger') => void
 }) {
+  const [kind, setKind] = useState<'erase' | 'reject' | null>(null)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmed, setConfirmed] = useState(false)
 
-  const r = action?.request
-  const erasing = action?.kind === 'erase'
+  const erasing = kind === 'erase'
+  const open = r.status === 'RECEIVED' || r.status === 'IN_PROGRESS'
+  const blocked = (r.blockers?.length ?? 0) > 0
+  const overdue = open && r.waiting_days >= OVERDUE_DAYS
 
-  function close() {
+  function reset() {
+    setKind(null)
     setReason('')
     setConfirmed(false)
-    setError(null)
-    onClose()
   }
 
   async function run() {
-    if (!action || !r) return
+    if (!kind) return
     setBusy(true)
     setError(null)
 
     try {
-      if (action.kind === 'erase') {
+      if (kind === 'erase') {
         const res = await api.post<ErasureResult>(
           `/admin/data-requests/${r.request_id}/erase`)
         onDone(
@@ -316,8 +281,7 @@ function ActionDialog({
         await api.post(`/admin/data-requests/${r.request_id}/reject`, { reason })
         onDone(`Request from ${r.student_name} declined. They will be told why.`, 'warn')
       }
-      setReason('')
-      setConfirmed(false)
+      reset()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The change could not be saved.')
     } finally {
@@ -326,34 +290,59 @@ function ActionDialog({
   }
 
   return (
-    <Dialog
-      open={!!action}
-      title={erasing ? 'Erase this student’s data' : 'Decline this request'}
-      onClose={close}
-      footer={
-        <>
-          <button onClick={close} disabled={busy}>Cancel</button>
-          <button
-            className="danger"
-            onClick={run}
-            disabled={busy || (erasing ? !confirmed : reason.trim().length < 10)}
-          >
-            {busy ? 'Working…' : erasing ? 'Erase permanently' : 'Decline request'}
-          </button>
-        </>
-      }
-    >
-      {error && <div className="alert danger" role="alert">{error}</div>}
+    <>
+      <header>
+        <div>
+          <h2 className="detail-title">{r.student_name}</h2>
+          <p className="detail-sub">
+            {r.request_type === 'ERASURE' ? 'Erasure' : 'Export'}
+            {' · asked '}{relative(r.requested_at)}
+            {' · '}{r.contact ?? 'no contact on file'}
+          </p>
+        </div>
+        {overdue
+          ? <Pill tone="danger">Overdue</Pill>
+          : <Pill tone={statusTone(r.status)}>{statusLabel(r.status)}</Pill>}
+      </header>
 
-      {r && (
-        <p style={{ marginTop: 0 }}>
-          <strong>{r.student_name}</strong>
-          <br />
-          <span className="muted">
-            {r.contact ?? 'no contact on file'} · asked {relative(r.requested_at)}
-          </span>
-        </p>
-      )}
+      <div className="detail-body">
+        {error && <div className="alert danger" role="alert">{error}</div>}
+
+        <dl className="detail-fields">
+          <dt>Asked on</dt>
+          <dd>{date(r.requested_at)}</dd>
+
+          <dt>{open ? 'Waiting' : 'Closed'}</dt>
+          <dd>
+            {open
+              ? `${r.waiting_days} day${r.waiting_days === 1 ? '' : 's'}`
+              : r.completed_at ? relative(r.completed_at) : '—'}
+          </dd>
+
+          {r.rejection_reason && (
+            <>
+              <dt>Declined because</dt>
+              <dd>{r.rejection_reason}</dd>
+            </>
+          )}
+        </dl>
+
+        {/* Stated where the decision is made. An erasure that cannot proceed has
+            a reason, and the operator should read it before reaching for a
+            button that is going to be disabled anyway. */}
+        {blocked && (
+          <div className="alert warn" style={{ marginTop: '0.75rem' }}>
+            <p>
+              This cannot be erased yet — {r.blockers?.join('; ')}
+            </p>
+          </div>
+        )}
+
+        {open && r.request_type === 'EXPORT' && (
+          <p className="muted" style={{ fontSize: 13 }}>
+            Exports are assembled automatically. There is nothing to decide here.
+          </p>
+        )}
 
       {erasing ? (
         <>
@@ -396,7 +385,7 @@ function ActionDialog({
             )}
           </Field>
         </>
-      ) : (
+      ) : kind === 'reject' ? (
         <Field
           label="Why is this being declined?"
           required
@@ -406,13 +395,47 @@ function ActionDialog({
           {props => (
             <textarea
               {...props}
+              autoFocus
               value={reason}
               onChange={e => setReason(e.target.value)}
               placeholder="An application is still being considered, so the record must be kept until it is decided."
             />
           )}
         </Field>
+      ) : null}
+      </div>
+
+      {canAct && open && r.request_type === 'ERASURE' && (
+        <div className="detail-actions">
+          {/* Still two steps. The first opens the consequences and the tick box,
+              the second carries it out — an irreversible act should not be one
+              click away from a list. */}
+          {kind ? (
+            <>
+              <button onClick={reset} disabled={busy}>Cancel</button>
+              <button
+                className="danger"
+                onClick={run}
+                disabled={busy || (erasing ? !confirmed : reason.trim().length < 10)}
+              >
+                {busy ? 'Working…' : erasing ? 'Erase permanently' : 'Decline request'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => setKind('reject')}>Decline</button>
+              <button
+                className="danger"
+                disabled={blocked}
+                title={blocked ? r.blockers?.join('; ') : undefined}
+                onClick={() => setKind('erase')}
+              >
+                Erase
+              </button>
+            </>
+          )}
+        </div>
       )}
-    </Dialog>
+    </>
   )
 }

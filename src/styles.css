@@ -440,7 +440,9 @@ body {
   top: 0;
   z-index: 20;
   display: flex; align-items: center; gap: 0.4rem;
-  padding: 0.5rem 1.5rem;
+  /* The same horizontal clamp as .main, so the bar's contents line up with the
+   * page's rather than drifting apart as the window narrows. */
+  padding: 0.5rem clamp(0.75rem, 2.5vw, 2rem);
   min-height: 3rem;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
@@ -578,7 +580,185 @@ html:not([data-theme="light"]) .avatar {
   font-size: 11px;
 }
 
-.main { padding: 1.25rem 1.5rem 3rem; min-width: 0; }
+/* The content column.
+ *
+ * Bounded, which it was not. A queue table with seven columns will happily
+ * stretch to whatever a 27-inch monitor offers, and at 2000px the distance
+ * between an organisation's name and its Approve button is most of an arm's
+ * length — the eye loses the row on the way across and the operator checks
+ * twice. 96rem is wide enough for the widest table here to breathe and narrow
+ * enough that a row stays one glance.
+ *
+ * Left-aligned rather than centred: the rail is on the left, and a centred
+ * column drifts away from it as the window widens, leaving the navigation
+ * stranded at the edge of a lake of background. */
+.main {
+  /* Fluid gutters. 1.5rem each side is 48px of a 320px phone — 15% of the
+   * screen spent on margin, on the device with the least to spare — and too
+   * tight on a wide monitor. clamp scales it with the viewport and stops at both
+   * ends, so no breakpoint has to be chosen and none can be missed.
+   *
+   * The bottom stays fixed: it exists so the last row is not flush against the
+   * window edge, and that need does not grow with the screen. */
+  padding: clamp(0.75rem, 2vw, 1.25rem) clamp(0.75rem, 2.5vw, 2rem) 3rem;
+  min-width: 0;
+  width: 100%;
+  max-width: 96rem;
+
+  /* The measuring stick for everything inside.
+   *
+   * inline-size, so descendants can ask how wide this column actually is rather
+   * than inferring it from the viewport. The two are not the same number: the
+   * rail takes 3.5rem off the front and this column stops growing at 96rem, so
+   * on a wide monitor the viewport keeps rising while the container does not. */
+  container: content / inline-size;
+}
+
+/* --- the split view ---------------------------------------------------------
+ *
+ * A queue on the left, the selected item in full on the right.
+ *
+ * What this replaces: a seven-column table plus a modal. The table carried
+ * every field because the modal was transient — it only appeared *after* the
+ * operator had decided to act, so everything needed to decide had to be on the
+ * row. And then the modal restated the same fields anyway, because a decision
+ * needs its subject in front of it. Both problems are the same problem: the
+ * detail wanted somewhere permanent to live.
+ *
+ * With a pane that stays put, the list needs three columns instead of seven,
+ * and working the queue stops being a cycle of open, read, act, close, find
+ * your place. You select the next one and the pane changes.
+ *
+ * Bounded by ch on the list, not by a fraction: the list holds names, and a name
+ * column that grows with the window gains nothing after about forty characters.
+ * The detail takes the rest. */
+.split {
+  display: grid;
+  grid-template-columns: minmax(18rem, 26rem) 1fr;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+/* One column when the content column cannot hold two, and only one pane is
+ * rendered at a time — see SplitView, which swaps rather than stacking. Two
+ * panes stacked would put the detail an entire queue's scroll below the item it
+ * belongs to.
+ *
+ * A container query, not a viewport one. What decides whether a queue and a
+ * detail pane fit side by side is the width of the column they are in, and that
+ * is the viewport minus the rail minus fluid gutters, capped at 96rem. A
+ * viewport breakpoint is a guess at that number which is wrong by the width of
+ * the rail and wrong again at every size where the cap has bitten.
+ *
+ * 52rem is the real threshold: an 18rem list, a 0.75rem gap, and a detail pane
+ * with enough room left for a definition list and a sentence. */
+@container content (max-width: 52rem) {
+  .split { grid-template-columns: 1fr; }
+}
+
+/* The list pane scrolls on its own so the detail stays put while you work down
+ * the queue. Capped against the viewport rather than a fixed height, so a short
+ * queue takes only the room it needs. --sticky-top is set by the shell and
+ * already accounts for the impersonation banner. */
+.split-list {
+  position: sticky;
+  top: calc(var(--sticky-top, 0px) + 3.5rem);
+  max-height: calc(100vh - var(--sticky-top, 0px) - 5rem);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.split-list .split-scroll { overflow-y: auto; min-height: 0; }
+
+@container content (max-width: 52rem) {
+  .split-list { position: static; max-height: none; }
+  .split-list .split-scroll { overflow-y: visible; }
+}
+
+/* --- the queue itself ------------------------------------------------------- */
+
+.queue { list-style: none; margin: 0; padding: 0.35rem; display: flex; flex-direction: column; gap: 2px; }
+
+.queue button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.15rem 0.5rem;
+  padding: 0.5rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.queue button:hover { background: var(--surface-sunken); }
+
+/* aria-current, not a class: the selected row is the current item within a set,
+ * which is the thing that attribute means, and it is what a screen reader
+ * announces without any extra label. */
+.queue button[aria-current="true"] {
+  background: var(--accent-weak);
+  border-color: var(--accent);
+}
+.queue .queue-name { font-weight: 600; overflow-wrap: anywhere; }
+.queue .queue-sub {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.queue .queue-side { justify-self: end; }
+
+/* --- the detail pane -------------------------------------------------------- */
+
+/* The pane is itself a container: its fields ask how wide *it* is. */
+.detail { container: pane / inline-size; }
+.detail > header { align-items: flex-start; }
+.detail-title { margin: 0; font-size: 16px; letter-spacing: -0.01em; }
+.detail-sub { margin: 0.15rem 0 0; font-size: 12px; color: var(--text-muted); }
+.detail-body { padding: 0.75rem; }
+.detail-actions {
+  padding: 0.6rem 0.75rem;
+  border-top: 1px solid var(--border);
+  display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end;
+}
+
+/* A definition list, because that is what it is: field name against value. Two
+ * columns while there is room, one below — a 9rem label column beside a value
+ * that has collapsed to 6rem is worse than stacking.
+ *
+ * This was a viewport query at 34rem, and it was simply wrong. The pane is the
+ * right-hand track of the split: on a 60rem viewport it is around 20rem wide,
+ * so the rule said "there is plenty of room, keep two columns" while the label
+ * column was eating half of what the pane had. It stacked when it did not need
+ * to and stayed side-by-side when it did.
+ *
+ * Asking the pane removes the guess. 26rem is where a 9rem label plus a value
+ * worth reading stops fitting. */
+.detail-fields { margin: 0; display: grid; grid-template-columns: 9rem 1fr; gap: 0.4rem 0.75rem; }
+.detail-fields dt { font-size: 12px; color: var(--text-muted); }
+.detail-fields dd { margin: 0; overflow-wrap: anywhere; }
+@container pane (max-width: 26rem) {
+  .detail-fields { grid-template-columns: 1fr; gap: 0.1rem; }
+  .detail-fields dd { margin-bottom: 0.45rem; }
+}
+
+/* Shown only in the one-column case, where the detail replaces the list. */
+.detail-back-row { display: none; }
+@container content (max-width: 52rem) {
+  .detail-back-row {
+    display: block;
+    padding: 0.5rem 0.6rem 0;
+  }
+}
+
+/* Which pane is rendered when there is only one column. Set by SplitView on
+ * whichever pane is not wanted; above the threshold the attribute is present
+ * but unused, because both panes fit. */
+@container content (max-width: 52rem) {
+  [data-narrow-hidden] { display: none; }
+}
 .page-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .page-head h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
 .page-head p { margin: 0.2rem 0 0; color: var(--text-muted); font-size: 13px; max-width: 62ch; }
