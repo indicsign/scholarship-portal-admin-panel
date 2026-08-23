@@ -187,6 +187,10 @@ export async function post<T>(path: string, body?: unknown) {
   return request<Envelope<T>>(path, { method: 'POST', body })
 }
 
+export async function patch<T>(path: string, body?: unknown) {
+  return request<Envelope<T>>(path, { method: 'PATCH', body })
+}
+
 export async function del<T>(path: string, body?: unknown) {
   return request<Envelope<T> | null>(path, { method: 'DELETE', body })
 }

@@ -352,3 +352,25 @@ export interface Slide {
   created_at: string
   updated_at: string
 }
+
+/* An account as the super admin administers it: who they are, what they may do,
+ * and everywhere they may do it. Distinct from UserSummary, which exists to find
+ * one account for a support session rather than to change it.
+ */
+export interface PlatformUserRole {
+  role: Role
+  organisation_id?: string
+  organisation_name?: string
+  /** Present for an organisational role, absent for a platform one. */
+  membership_id?: string
+}
+
+export interface PlatformUser {
+  user_id: string
+  email?: string
+  phone?: string
+  status: string
+  last_login_at?: string
+  created_at: string
+  roles: PlatformUserRole[]
+}

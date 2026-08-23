@@ -12,6 +12,7 @@ import Grievances from './pages/Grievances'
 import Messages from './pages/Messages'
 import Ecosystem from './pages/Ecosystem'
 import Login from './pages/Login'
+import Accounts from './pages/Accounts'
 import Organisations from './pages/Organisations'
 import Slides from './pages/Slides'
 import Support from './pages/Support'
@@ -75,6 +76,7 @@ function AuthenticatedApp() {
         <Route path="/ecosystem" element={<Ecosystem />} />
         <Route path="/audit" element={<Audit />} />
         <Route path="/support" element={<Support />} />
+        <Route path="/accounts" element={<Accounts />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

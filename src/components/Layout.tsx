@@ -18,7 +18,15 @@ import { focusPrimaryFilter, useShortcuts, type Shortcut } from '../lib/shortcut
 /* One list, read by the sidebar, the shortcuts and the document title. Three
  * copies of the same four routes is how a section ends up navigable by keyboard
  * but missing from the menu. */
-const SECTIONS = [
+type Section = {
+  to: string
+  label: string
+  key: string
+  /** Hidden unless the caller is the platform super admin. */
+  superAdminOnly?: boolean
+}
+
+const SECTIONS: Section[] = [
   { to: '/dashboard', label: 'Dashboard', key: 'd' },
   { to: '/organisations', label: 'Organisations', key: 'o' },
   { to: '/ecosystem', label: 'Ecosystem', key: 'e' },
@@ -28,6 +36,10 @@ const SECTIONS = [
   { to: '/slides', label: 'Slides', key: 'l' },
   { to: '/audit', label: 'Audit trail', key: 'a' },
   { to: '/support', label: 'Support access', key: 's' },
+  // Only the super admin administers accounts, so only they are offered the
+  // link. Showing it to platform staff would be offering a door that answers
+  // 403 — the route and the service refuse it either way.
+  { to: '/accounts', label: 'Accounts', key: 'u', superAdminOnly: true },
 ] as const
 
 interface Props {
@@ -44,8 +56,14 @@ export default function Layout({ pendingOrganisations, openDataRequests }: Props
   const mainRef = useRef<HTMLElement>(null)
   const firstRender = useRef(true)
 
+  // Filtered once. A section the caller may not reach must disappear from the
+  // keyboard shortcuts too, or `g u` would navigate to a screen that refuses.
+  const sections = SECTIONS.filter(
+    s => !s.superAdminOnly || context?.role === 'PLATFORM_SUPER_ADMIN',
+  )
+
   const shortcuts: Shortcut[] = [
-    ...SECTIONS.map(s => ({
+    ...sections.map(s => ({
       keys: `g ${s.key}`,
       label: `Go to ${s.label.toLowerCase()}`,
       run: () => navigate(s.to),
@@ -66,7 +84,7 @@ export default function Layout({ pendingOrganisations, openDataRequests }: Props
    * Skipped on first paint, where stealing focus from the document would
    * interrupt a reader who has not started. */
   useEffect(() => {
-    const section = SECTIONS.find(s => s.to === location.pathname)
+    const section = sections.find(s => s.to === location.pathname)
     document.title = section
       ? `${section.label} · Admin panel`
       : 'Admin panel · Scholarship Platform'
@@ -92,7 +110,7 @@ export default function Layout({ pendingOrganisations, openDataRequests }: Props
           </div>
 
           <div className="nav">
-            {SECTIONS.map(s => {
+            {sections.map(s => {
               const count = s.to === '/organisations' ? pendingOrganisations
                 : s.to === '/data-requests' ? openDataRequests
                   : 0
