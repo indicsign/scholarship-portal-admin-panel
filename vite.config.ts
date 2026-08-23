@@ -10,14 +10,25 @@ import react from '@vitejs/plugin-react'
 // see nginx.conf.template.
 export default defineConfig(({ mode }) => {
   // loadEnv, not process.env. Vite reads .env into import.meta.env for the
-  // application but does NOT put it in process.env, so `process.env.VITE_API_TARGET`
-  // here was always undefined and the proxy silently fell back to localhost:8080
-  // no matter what .env said — which .env.example documents as the way to point
-  // the panel somewhere else. loadEnv reads the same files, and a real
-  // environment variable still wins over them, so
-  // `VITE_API_TARGET=… npm run dev` keeps working.
-  const env = loadEnv(mode, process.cwd(), 'VITE_')
-  const target = env.VITE_API_TARGET ?? 'http://localhost:8080'
+  // application but does NOT put it in process.env, so `process.env.API_TARGET`
+  // here would always be undefined and the proxy would silently fall back to
+  // localhost:8080 no matter what .env said. loadEnv reads the same files, and a
+  // real environment variable still wins over them, so `API_TARGET=… npm run dev`
+  // keeps working.
+  //
+  // API_ has to be named in the prefix list. loadEnv filters by prefix, so with
+  // 'VITE_' alone `env.API_TARGET` is undefined however it is set — the proxy
+  // would then have `target: undefined` and every call would fail in a way that
+  // looks like the API is down rather than like a misread variable.
+  //
+  // API_TARGET rather than VITE_API_TARGET so this file and nginx.conf.template
+  // read one name: the panel is pointed at an API the same way whether it is
+  // served by `vite preview` or by the container. It is deliberately not a VITE_
+  // variable — those are substituted into the bundle at build time, and the
+  // API's address is a deployment property, not something baked into the
+  // JavaScript.
+  const env = loadEnv(mode, process.cwd(), ['VITE_', 'API_'])
+  const target = env.API_TARGET ?? 'http://localhost:8080'
 
   // changeOrigin on every entry, not just /api: a public API is reached by a
   // name that routes on Host, and sending it `localhost:5174` gets somebody

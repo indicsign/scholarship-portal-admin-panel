@@ -8,8 +8,23 @@
 import type { ApiErrorBody, Envelope } from './types'
 
 /** Must match API_VERSION on the server; see .env.example. */
-const VERSION = import.meta.env.VITE_API_VERSION
-const BASE = `${import.meta.env.API_TARGET ?? ''}/api/${VERSION}`
+//
+// `||`, not `??`. With VITE_API_VERSION unset, Vite replaces `import.meta.env`
+// with an object literal that simply lacks the key, and the bundler folds the
+// access to the *string* "undefined" rather than leaving a nullish value for
+// `??` to catch — every request then goes to /api/undefined. `||` also covers
+// VITE_API_VERSION= (empty), which builds a panel calling /api/ with no version.
+const VERSION = import.meta.env.VITE_API_VERSION || 'v1'
+
+// A relative path, deliberately. The API's address is NOT baked in here: nginx
+// (and `npm run dev`) proxies /api to it, so the browser sees one origin and
+// sends the HttpOnly refresh cookie without CORS credentials or SameSite=None.
+// An absolute URL here would make every call cross-origin and break that.
+//
+// Only VITE_-prefixed variables reach browser code at all, so an
+// `import.meta.env.API_TARGET` is always undefined — API_TARGET is nginx's
+// setting, read inside the container at start-up.
+const BASE = `/api/${VERSION}`
 
 /** A failure the API described, as against a network or parsing failure. */
 export class ApiError extends Error {
