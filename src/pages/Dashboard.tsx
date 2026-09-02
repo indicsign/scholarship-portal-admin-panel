@@ -5,6 +5,8 @@ import { compact, count, date, money } from '../lib/format'
 import { ErrorState, Loading } from '../components/ui'
 import { Bars, Columns, Stat, type BarRow } from '../components/charts'
 import { useQuery } from '../lib/hooks'
+import { useAuth } from '../lib/auth-context'
+import OperatorDashboard from './OperatorDashboard'
 import type { OverviewReport } from '../lib/types'
 
 /* The operations dashboard.
@@ -36,7 +38,24 @@ const WINDOWS = [
   { days: 0, label: 'All time' },
 ] as const
 
+/* Two dashboards behind one route.
+ *
+ * The nav has a single Dashboard entry for everybody, and what it renders
+ * depends on who is reading. This one is the platform's own report — money
+ * delivered, students reached, the funnel over a period — which is the question
+ * whoever answers for the platform asks. An administrator or a staff member is
+ * asking a different one, and OperatorDashboard answers it.
+ *
+ * Branching here rather than in the router keeps the route table saying what
+ * URLs exist rather than who may see them, and means neither component has to
+ * know the other exists. */
 export default function Dashboard() {
+  const { context } = useAuth()
+  if (context?.role !== 'SUPER_ADMIN') return <OperatorDashboard />
+  return <PlatformDashboard />
+}
+
+function PlatformDashboard() {
   const [days, setDays] = useState(30)
 
   const query = useQuery<{ report: OverviewReport; note: string }>(

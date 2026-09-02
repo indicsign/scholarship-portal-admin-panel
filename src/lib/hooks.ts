@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import * as api from './api'
+
 export interface QueryMeta {
   page: number
   page_size: number
@@ -97,4 +99,55 @@ export function useDebounced<T>(value: T, ms = 300) {
   }, [value, ms])
 
   return debounced
+}
+
+
+/* An image the caller is allowed to see but an <img> cannot ask for.
+ *
+ * Returns an object URL, or null while it loads and if there is nothing there.
+ * `version` is a cache-buster the caller bumps after a replacement — the URL is
+ * otherwise identical and nothing would refetch.
+ *
+ * The URL is revoked whenever it is replaced and when the component unmounts.
+ * An object URL pins its blob in memory until then, and a screen that previews
+ * a logo per row would otherwise hold every one it had ever shown.
+ */
+export function useAuthedImage(path: string | null, version = 0) {
+  /* Empty when there is nothing to fetch, which is what makes the no-path case
+     fall out of the derivation below instead of needing a setState at the top
+     of the effect — see the note on useQuery. */
+  const key = path ? `${path}|${version}` : ''
+
+  const [loaded, setLoaded] = useState<{ key: string; url: string } | null>(null)
+
+  useEffect(() => {
+    if (!key) return
+
+    const controller = new AbortController()
+    let objectURL: string | null = null
+
+    api.fetchBlob(path!, controller.signal)
+      .then(blob => {
+        if (controller.signal.aborted) return
+        objectURL = URL.createObjectURL(blob)
+        setLoaded({ key, url: objectURL })
+      })
+      .catch(() => {
+        // Silent. A 404 is the ordinary "no logo yet" case, and every other
+        // failure leaves the caller's fallback on screen — an error banner over
+        // a missing decoration would be noise.
+      })
+
+    return () => {
+      controller.abort()
+      /* Revoked here rather than on the next success: an object URL pins its
+         blob until it is, so a screen that previewed one per row would hold
+         every image it had ever shown. */
+      if (objectURL) URL.revokeObjectURL(objectURL)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+
+  // Held over from a previous path would be the wrong picture, not a stale one.
+  return loaded?.key === key ? loaded.url : null
 }

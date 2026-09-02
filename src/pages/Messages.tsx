@@ -23,15 +23,33 @@ import type { NotificationTemplate } from '../lib/types'
  * beside the box, insertable with one click, and a save that introduces an
  * unfillable one is refused by the API with the offending name in the message.
  *
- * Hindi sits beside English rather than behind a tab. The platform launches in
- * both, the report treats neither as the translation of the other, and a
- * language you have to go looking for is the one that silently rots.
+ * Hindi was shown inline beside every English message, on the argument that a
+ * language you have to go looking for is the one that silently rots. The
+ * argument holds; showing all of it always was the wrong way to honour it,
+ * because fifteen templates in two languages is a page nobody reads to the end
+ * — and a page nobody reads is where rot lives too.
+ *
+ * So the two cases are separated. A template WITH Hindi folds it behind a
+ * toggle, off by default: an operator scanning for an English phrase is not
+ * made to read past it fifteen times, and one comparing wording turns it on
+ * once for the whole list. A template WITHOUT Hindi still says so inline and
+ * always, because that is the case that actually rots — a message quietly
+ * falling back to English for a student who reads Hindi — and no control should
+ * be able to hide it.
+ *
+ * The editor carries both languages regardless, and nothing here changes what
+ * is stored or what is sent: notify/service.go picks body_hi from the
+ * recipient's preferred_language exactly as before.
  */
 
 export default function Messages() {
   const { can } = useAuth()
   const announce = useAnnounce()
   const [editing, setEditing] = useState<NotificationTemplate | null>(null)
+  /* Off by default, and one switch for the whole list rather than one per card:
+     somebody checking translations wants all of them, not to click fifteen
+     times. */
+  const [showHindi, setShowHindi] = useState(false)
 
   const query = useQuery<NotificationTemplate[]>(
     signal => api.get('/admin/templates', undefined, signal),
@@ -51,11 +69,21 @@ export default function Messages() {
         <div>
           <h1>Messages</h1>
           <p>
-            The wording of every notification the platform sends, in English and
-            Hindi. Changes take effect on the next message sent — there is no
-            deploy and no review step, so read it twice.
+            The wording of every notification the platform sends. Changes take
+            effect on the next message sent — there is no deploy and no review
+            step, so read it twice.
           </p>
         </div>
+
+        <label className="row" style={{ fontSize: 13, gap: '0.4rem' }}>
+          <input
+            type="checkbox"
+            style={{ width: 'auto', minHeight: 0 }}
+            checked={showHindi}
+            onChange={e => setShowHindi(e.target.checked)}
+          />
+          Show Hindi
+        </label>
       </div>
 
       {!canEdit && (
@@ -94,12 +122,15 @@ export default function Messages() {
               {t.subject_en && <p className="msg-subject">{t.subject_en}</p>}
               <p className="msg-body">{t.body_en}</p>
 
-              {t.body_hi ? (
+              {/* Shown only when asked for. The absence of Hindi is not: that
+                  is a fallback a Hindi-reading student experiences and nobody
+                  else sees, so it is stated whether or not the toggle is on. */}
+              {t.body_hi ? (showHindi && (
                 <>
                   {t.subject_hi && <p className="msg-subject" lang="hi">{t.subject_hi}</p>}
                   <p className="msg-body" lang="hi">{t.body_hi}</p>
                 </>
-              ) : (
+              )) : (
                 <p className="faint" style={{ fontSize: 12, margin: '0.5rem 0 0' }}>
                   No Hindi version — students reading in Hindi get the English one.
                 </p>

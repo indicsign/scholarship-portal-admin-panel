@@ -74,13 +74,19 @@ export const IconEcosystem = (p: IconProps) => (
   </Svg>
 )
 
-/** A document leaving: erasure and export requests. */
-export const IconDataRequests = (p: IconProps) => (
+/* A document with a tick: verification.
+ *
+ * This slot held a document with an arrow leaving it, for the export and
+ * erasure queue, and was pressed into service for verification when that queue
+ * went. The two are opposite acts — one sends a record away, one attests to it —
+ * and an icon that says the wrong thing is worse than a generic one, because the
+ * rail is glyph-only until it is hovered. */
+export const IconVerifications = (p: IconProps) => (
   <Svg {...p}>
-    <path d="M13.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8" />
-    <path d="M13.5 3v6h5.5" />
-    <path d="M9 15.5h6" />
-    <path d="M12.5 13l2.5 2.5-2.5 2.5" />
+    <path d="M13.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5" />
+    <path d="M13.5 3v6H19v3" />
+    <path d="M9 12h3" />
+    <path d="M14 17.5l2 2 4-4" />
   </Svg>
 )
 
@@ -137,6 +143,66 @@ export const IconUsers = (p: IconProps) => (
     <path d="M3 20a6.5 6.5 0 0 1 13 0" />
     <path d="M16.5 5.2a3.5 3.5 0 0 1 0 6.6" />
     <path d="M18 20a6.6 6.6 0 0 0-1.6-4.3" />
+  </Svg>
+)
+
+/** A mortarboard: what the money is for. */
+export const IconScholarships = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 3.6 22 8.3 12 13 2 8.3z" />
+    <path d="M6.6 10.5v4.4c0 1.6 2.4 2.9 5.4 2.9s5.4-1.3 5.4-2.9v-4.4" />
+    <path d="M22 8.3v4.8" />
+  </Svg>
+)
+
+/* --- authoring form sections -------------------------------------------------
+ *
+ * Landmarks in a long dialog. The heading beside each one says what it is, so
+ * these only have to be distinguishable from one another at a glance while
+ * scrolling — which is what makes a single bold object right here and a clever
+ * composite wrong. */
+
+/** A page with writing on it: the listing itself. */
+export const IconScheme = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M6 3h7l5 5v12.5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+    <path d="M13 3v5h5" />
+    <path d="M8.5 13h7" />
+    <path d="M8.5 16.5h4.5" />
+  </Svg>
+)
+
+/** A banknote: what the student actually receives. */
+export const IconBenefit = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2.5" y="6" width="19" height="12" rx="2" />
+    <circle cx="12" cy="12" r="2.6" />
+    <path d="M6 10v4" />
+    <path d="M18 10v4" />
+  </Svg>
+)
+
+/** A funnel: the conditions that narrow who this is for. */
+export const IconEligibility = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 5h18l-7 8.2V20l-4 1.5v-8.3z" />
+  </Svg>
+)
+
+/** An arrow leaving a frame: where the student goes next. */
+export const IconApply = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M14 3.5h6.5V10" />
+    <path d="M20.5 3.5 12 12" />
+    <path d="M18.5 14v5.5a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2H11" />
+  </Svg>
+)
+
+/** A label with its eyelet: how a visitor finds this in the directory. */
+export const IconTag = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 12.4V4.6a1.6 1.6 0 0 1 1.6-1.6h7.8l8.2 8.2a1.6 1.6 0 0 1 0 2.3l-6.5 6.5a1.6 1.6 0 0 1-2.3 0z" />
+    <circle cx="7.6" cy="7.6" r="1.5" />
   </Svg>
 )
 

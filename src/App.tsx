@@ -7,17 +7,19 @@ import { Loading } from './components/ui'
 import { useQuery } from './lib/hooks'
 import Audit from './pages/Audit'
 import Dashboard from './pages/Dashboard'
-import DataRequests from './pages/DataRequests'
 import Grievances from './pages/Grievances'
+import Scholarships from './pages/Scholarships'
 import Messages from './pages/Messages'
 import Ecosystem from './pages/Ecosystem'
 import Login from './pages/Login'
 import SetPassword from './pages/SetPassword'
 import Users from './pages/Users'
 import Organisations from './pages/Organisations'
+import Verifications from './pages/Verifications'
 import Slides from './pages/Slides'
 import Support from './pages/Support'
-import type { Organisation } from './lib/types'
+import type { QueueCounts } from './lib/queues'
+import type { Catalogue, Organisation, VerificationCounts } from './lib/types'
 
 export default function App() {
   const { status } = useAuth()
@@ -43,8 +45,14 @@ function AuthenticatedApp() {
    *
    * All three share a failure mode — nobody looks — and all three run against a
    * clock, which is what earns them a number in the sidebar while the other
-   * seven sections get none. Each asks for a single row and reads meta.total,
-   * so the cost is three counts rather than three pages of records.
+   * sections get none.
+   *
+   * The queues themselves are declared in lib/queues.ts, which is what the
+   * sidebar and the bell also read. Not fetched from that list in a loop, and
+   * that is deliberate: useQuery is a hook, so a loop over a list would break
+   * the rules of hooks the first time the list became conditional. The list
+   * decides what a queue IS; these three calls decide how each is counted, and
+   * two of them return a figure set directly rather than a page of one row.
    */
   const pending = useQuery<Organisation[]>(
     signal => api.get('/admin/organisations', {
@@ -53,10 +61,19 @@ function AuthenticatedApp() {
     [],
   )
 
-  const dataRequests = useQuery<unknown[]>(
-    signal => api.get('/admin/data-requests', {
-      status: 'RECEIVED', page_size: 1,
-    }, signal),
+  /* Like the review counts, this endpoint returns the figure set directly
+     rather than a page of one row. */
+  /* Schemes waiting on a platform decision. Read from the catalogue rather than
+     from the old review-queue endpoint, because the catalogue is now where the
+     decision is taken — one source, so the badge and the screen it points at
+     cannot disagree. page_size 1: only the counts are wanted. */
+  const catalogue = useQuery<Catalogue>(
+    signal => api.get('/admin/scholarships', { page_size: 1 }, signal),
+    [],
+  )
+
+  const verifications = useQuery<VerificationCounts>(
+    signal => api.get('/admin/verifications/counts', undefined, signal),
     [],
   )
 
@@ -70,24 +87,26 @@ function AuthenticatedApp() {
     [],
   )
 
+  const counts: QueueCounts = {
+    organisations: pending.meta?.total ?? 0,
+    scholarships: catalogue.data?.counts.pending ?? 0,
+    verifications: verifications.data?.waiting ?? 0,
+    grievances: grievances.meta?.total ?? 0,
+  }
+
   return (
     <Routes>
-      <Route element={
-        <Layout
-          pendingOrganisations={pending.meta?.total ?? 0}
-          openDataRequests={dataRequests.meta?.total ?? 0}
-          overdueGrievances={grievances.meta?.total ?? 0}
-        />
-      }>
+      <Route element={<Layout counts={counts} />}>
         {/* The dashboard is the landing screen: the first question an
             operator has on opening the panel is how the platform is doing,
             not which organisation is waiting. The approval queue keeps its
             unread count in the sidebar so it is never missed for that. */}
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/verifications" element={<Verifications />} />
         <Route path="/organisations" element={<Organisations />} />
-        <Route path="/data-requests" element={<DataRequests />} />
         <Route path="/grievances" element={<Grievances />} />
+        <Route path="/scholarships" element={<Scholarships />} />
         <Route path="/messages" element={<Messages />} />
         <Route path="/slides" element={<Slides />} />
         <Route path="/ecosystem" element={<Ecosystem />} />

@@ -2,12 +2,13 @@ import { useState } from 'react'
 
 import * as api from '../lib/api'
 import { useAuth } from '../lib/auth-context'
-import { humanise, relative, timestamp } from '../lib/format'
+import { count, humanise, relative, timestamp } from '../lib/format'
 import { Empty, ErrorState, Field, Loading, Pager, Pill } from '../components/ui'
 import SplitView, { DetailEmpty, QueueItem } from '../components/SplitView'
+import { Stat } from '../components/charts'
 import { useQuery } from '../lib/hooks'
 import { useAnnounce } from '../lib/announce'
-import type { Grievance, GrievanceHandler } from '../lib/types'
+import type { Grievance, GrievanceCounts, GrievanceHandler } from '../lib/types'
 
 /* Grievances — the platform's half of FR-18.
  *
@@ -59,6 +60,11 @@ export default function Grievances() {
     [],
   )
 
+  const counts = useQuery<GrievanceCounts>(
+    signal => api.get('/admin/grievances/counts', undefined, signal),
+    [],
+  )
+
   const rows = query.data ?? []
 
   /* Derived while rendering, so the pane can never show a grievance the list no
@@ -86,6 +92,35 @@ export default function Grievances() {
           </p>
         </div>
       </div>
+
+      {counts.data && (
+        <div className="grid cols-4" style={{ marginBottom: '0.75rem' }}>
+          <Stat
+            label="Raised"
+            value={count(counts.data.total)}
+            sub="Every complaint students have brought, across all organisations"
+          />
+          <Stat
+            label="Still live"
+            value={count(counts.data.open + counts.data.escalated)}
+            sub={counts.data.escalated > 0
+              ? `${count(counts.data.escalated)} escalated past the ordinary queue`
+              : 'Open, in progress, or waiting on the student'}
+          />
+          <Stat
+            label="Overdue"
+            value={count(counts.data.overdue)}
+            sub={counts.data.overdue > 0
+              ? 'Past the date the student was promised an answer'
+              : 'Everything live is inside its promise'}
+          />
+          <Stat
+            label="Settled"
+            value={count(counts.data.resolved + counts.data.closed)}
+            sub={`${count(counts.data.resolved)} resolved, ${count(counts.data.closed)} closed without action`}
+          />
+        </div>
+      )}
 
       {!canHandle && (
         <div className="alert warn" role="status">
@@ -182,6 +217,8 @@ export default function Grievances() {
               onDone={message => {
                 announce(message)
                 query.reload()
+                // Resolving one moves it from "still live" to "settled".
+                counts.reload()
               }}
             />
           ) : (

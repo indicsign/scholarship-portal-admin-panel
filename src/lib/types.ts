@@ -60,6 +60,10 @@ export interface Account {
   user_id: string
   email?: string
   phone?: string
+  /* The third sign-in identifier, when the account has claimed one. Absent means
+     it never has, which is what the first-password screen tests to decide
+     whether to ask for one. */
+  username?: string
 }
 
 export interface LoginResult {
@@ -96,6 +100,9 @@ export interface Organisation {
   created_at: string
   member_count?: number
   scholarship_count?: number
+  /** Whether the organisation has a logo; the address is built from its id. */
+  has_logo?: boolean
+  logo_alt?: string
 }
 
 /* --- operations overview -----------------------------------------------------
@@ -213,34 +220,6 @@ export interface EcosystemReport {
     times_reused: number
     reuse_ratio: number
   }
-}
-
-/* --- data requests (FR-20) ---------------------------------------------------
- *
- * The operator's queue. A student's right to export or erasure carries a
- * statutory clock, so how long a request has been waiting is part of the row
- * rather than something the reader works out. */
-
-export interface DataRequest {
-  request_id: string
-  profile_id: string
-  request_type: 'EXPORT' | 'ERASURE' | 'CORRECTION'
-  status: 'RECEIVED' | 'IN_PROGRESS' | 'COMPLETED' | 'REJECTED'
-  requested_at: string
-  completed_at?: string
-  student_name: string
-  contact?: string
-  waiting_days: number
-  /** Reasons this cannot be fulfilled as asked. Empty means erasable now. */
-  blockers: string[] | null
-  rejection_reason?: string
-  handled_by?: string
-}
-
-export interface ErasureResult {
-  documents_deleted: number
-  retained: string[]
-  message: string
 }
 
 /* --- grievances (FR-18) ------------------------------------------------------ */
@@ -391,5 +370,345 @@ export interface PlatformUser {
   status: string
   last_login_at?: string
   created_at: string
+  /** The student profile behind the account, absent where there is none. */
+  profile_id?: string
+  /* The name on that profile.
+   *
+   * A student registers by mobile number and may never give an email, so
+   * without this a row identifies a person as "+9178…" — and a list of them is
+   * unusable. Two students with the same name on different numbers is the case
+   * that makes it acute: the row offers a Documents button and no way to tell
+   * whose documents they are. */
+  full_name?: string
   roles: PlatformUserRole[]
+}
+
+/* --- the catalogue (admin) ---------------------------------------------------
+ *
+ * A scholarship is one of two shapes, and the panel has to tell them apart
+ * because they offer different actions and mean different things by "apply":
+ *
+ *   TENANT   an organisation on the platform runs it and receives applications
+ *            through the workflow. The platform may publish, pause or close it,
+ *            and may not rewrite its wording.
+ *   CURATED  the platform lists it so students find it. The sponsor has no
+ *            account, there is no budget or workflow, and applying means going
+ *            to external_url.
+ *
+ * The nullable fields are the ones a curated listing may not have. Sponsor and
+ * sponsor_type are resolved server-side from whichever column holds them.
+ */
+export type ListingKind = 'TENANT' | 'CURATED'
+
+/* The basis on which the money is given — the first thing a student filters by
+ * once past "am I eligible". A merit scheme and a need scheme are different
+ * propositions to the same person. */
+export type AwardBasis = 'MERIT' | 'NEED' | 'MERIT_CUM_MEANS' | 'CATEGORY' | 'OTHER'
+
+/* One entry of the closed tag vocabulary, served from listing_tag.
+ *
+ * Closed rather than free text because a bare string column gave the public
+ * directory three separate facets for "Engineering", "engineering" and "Engg".
+ * The form renders these as checkboxes grouped by kind. */
+export interface ListingTag {
+  tag: string
+  label: string
+  label_hi?: string
+  kind: 'SUBJECT' | 'BASIS' | 'LEVEL'
+  position: number
+}
+
+/* One eligibility rule as it is stored.
+ *
+ * `value` is whatever JSON the field takes — a number for a numeric comparison,
+ * an array for IN — which is why it is `unknown` here rather than a string. The
+ * editor turns it back into text to put in an input and re-types it on save.
+ */
+export interface ListingRule {
+  rule_id: string
+  field: string
+  op: string
+  value: unknown
+  hard: boolean
+  requires_document?: string
+  description: string
+  description_hi?: string
+}
+
+export interface Listing {
+  scholarship_id: string
+  listing_kind: ListingKind
+  title: string
+  slug: string
+  status: string
+
+  /* Where the listing stands with review, and the single word to show for it.
+   *
+   * Two states rather than one because a live scheme with an edit awaiting
+   * approval is a real state and `status` alone cannot express it: the listing
+   * is PUBLISHED throughout while the edit waits. The API collapses the pair
+   * into `listing_state`, which is what the actions and the pill both read —
+   * this panel must not recompute it, or it and the publisher console will
+   * eventually disagree about the same scheme in front of the same person. */
+  review_status: ReviewStatus
+  listing_state: ListingState
+  /** The reviewer's own words on the last decision. */
+  review_note?: string
+  sponsor: string
+  sponsor_type?: OrgType
+  organisation_id?: string
+  summary: string
+  /** Single read only — the catalogue list omits it. */
+  description?: string
+  award_amount?: number
+  currency: string
+  budget_total?: number
+  opens_at?: string
+  closes_at?: string
+  published_at?: string
+  external_url?: string
+  /** Chosen from the closed vocabulary; see ListingTag. */
+  tags: string[]
+  /* Computed from the eligibility rules and never stored. A tag that restates a
+     rule can contradict it after a later edit; these cannot, because they are
+     the rules read a second way. Read-only — the form never sends them. */
+  derived_tags?: string[]
+
+  academic_year?: string
+  award_basis?: AwardBasis
+
+  benefit_summary?: string
+  /** Single read only. */
+  benefit_description?: string
+  /** Single read only. Prose restatement of the rules; the rules still decide. */
+  eligibility_summary?: string
+  /** Single read only. */
+  documents_required?: string[]
+  /** Single read only. */
+  application_process?: string
+  /** Single read only. */
+  important_notes?: string
+
+  contact_email?: string
+  contact_phone?: string
+
+  /* The sponsor's mark — from the organisation for a tenant scheme, from the
+     row itself for a curated one. A flag rather than a URL: the address is
+     derivable from the id, and the panel already holds it. */
+  has_logo?: boolean
+  logo_alt?: string
+  /** Zero means publishing is refused: a scheme with no rules matches everyone. */
+  rule_count: number
+  /* Single read only, and what the edit form must round-trip: an update
+     replaces the rule set with whatever it is sent, so saving a form that never
+     loaded these would strip the listing's eligibility. */
+  rules?: ListingRule[]
+  /** Set when another row shares this folded title; points at the oldest. */
+  duplicate_of?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CatalogueCounts {
+  total: number
+  draft: number
+  published: number
+  paused: number
+  closed: number
+  archived: number
+  curated: number
+  duplicates: number
+  /* Waiting on a platform decision: submitted for the first time, or live with
+     an undecided edit. Leads the screen, because it is what somebody is waiting
+     for rather than a description of the catalogue. */
+  pending: number
+}
+
+export interface Catalogue {
+  counts: CatalogueCounts
+  matched: number
+  listings: Listing[]
+}
+
+
+/* --- queue headers -----------------------------------------------------------
+ *
+ * The figures each queue screen leads with. Deliberately over the whole table
+ * rather than the filtered page: they double as the filter, and a count that
+ * changed when you clicked it could not be used to navigate by.
+ */
+
+export interface OrganisationCounts {
+  total: number
+  pending: number
+  approved: number
+  rejected: number
+  suspended: number
+}
+
+
+export interface GrievanceCounts {
+  total: number
+  /** OPEN, IN_PROGRESS and AWAITING_APPLICANT together: how much is still live. */
+  open: number
+  resolved: number
+  closed: number
+  /** Live and past its due_at. */
+  overdue: number
+  escalated: number
+}
+
+/* --- scholarship review (migration 0033) ------------------------------------- */
+
+/* Where a scheme stands with platform review. Mirrors scholarship_review_status
+ * and domain.ReviewStatus. */
+export type ReviewStatus =
+  | 'UNSUBMITTED' | 'PENDING' | 'CHANGES_REQUESTED' | 'APPROVED' | 'REJECTED'
+
+/* The one word to show, computed by the API.
+ *
+ * A scheme has two stored states — what the public sees, and where moderation is
+ * — because a live listing with an edit awaiting approval is a real state that
+ * one column cannot express. The API collapses the pair; this panel must not
+ * recompute it, or it and the publisher's console will eventually disagree about
+ * the same scheme in front of the same person.
+ */
+export type ListingState =
+  | 'DRAFT'
+  | 'PENDING_REVIEW'
+  | 'CHANGES_REQUESTED'
+  | 'REJECTED'
+  | 'PUBLISHED'
+  | 'PUBLISHED_EDIT_PENDING'
+  | 'PUBLISHED_EDIT_REFUSED'
+  | 'PAUSED'
+  | 'CLOSED'
+  | 'ARCHIVED'
+
+/* --- document verification --------------------------------------------------- */
+
+/* One row of the verification queue: a student, not a document.
+ *
+ * A certificate is not really checkable on its own — the percentage on the scan
+ * has to match the percentage on the profile, and the name has to be the same
+ * person — so the queue is grouped by whom the work is about. */
+export interface PendingStudent {
+  profile_id: string
+  /* The account behind the profile, and its standing. Carried because this is
+     where a student is looked at, and looking at one raises the account
+     questions — sending the operator to User management to answer them means
+     searching for a phone number they would have to copy out of this row. */
+  user_id: string
+  account_status: string
+  student_name: string
+  contact?: string
+  waiting_count: number
+  doc_types: string[]
+  /* How much of them has been attested to. Both numbers, because the ratio is
+     what a reader wants: "2 of 3 verified" says something "2 verified" does not,
+     and the difference decides whether there is anything left to do. */
+  verified_count: number
+  document_count: number
+  oldest_uploaded_at: string
+  /** Computed server-side, so the sort order and the number shown agree. */
+  waiting_days: number
+  previously_rejected: boolean
+}
+
+export interface VerificationCounts {
+  waiting: number
+  /** Waiting longer than a week — the number that should be small. */
+  overdue: number
+  verified: number
+  rejected: number
+  expiring_soon: number
+}
+
+/** A live attestation against a document. */
+export interface Verification {
+  verification_id: string
+  status: 'VERIFIED' | 'REJECTED' | 'REVOKED'
+  verified_by_organisation?: string
+  verifier_role: string
+  evidence_considered: string
+  notes?: string
+  issued_at: string
+  valid_from: string
+  valid_until: string
+  rejection_reason?: string
+}
+
+/** A document in the vault, with its attestation where there is one. */
+export interface VaultDocument {
+  document_id: string
+  profile_id: string
+  doc_type: string
+  status: string
+  original_name: string
+  mime_type: string
+  size_bytes: number
+  uploaded_at: string
+  verification?: Verification
+}
+
+/* A student's profile as the verification screen reads it.
+ *
+ * Narrower than the portal's own: this screen shows what was claimed so it can
+ * be checked against a scan, so it needs the claims and `verified_fields`, and
+ * not the next-steps guidance the student sees. */
+export interface StudentProfile {
+  profile_id: string
+  full_name: string
+  date_of_birth?: string
+  gender?: string
+  disability_type?: string
+  disability_percent?: number
+  udid_number?: string
+  course_level?: string
+  course_name?: string
+  institution_name?: string
+  academic_percentage?: number
+  annual_family_income?: number
+  social_category?: string
+  district?: string
+  state_code?: string
+  completeness_score: number
+  /* The profile fields backed by a live attestation. This is what the blue
+     badge reads: it is maintained by a trigger from verification_record, so a
+     field is verified here exactly when the vault says so. */
+  verified_fields: string[]
+}
+
+/** One student's claims and the evidence behind them, in one response. */
+export interface StudentVerification {
+  profile: StudentProfile
+  documents: VaultDocument[]
+}
+
+/* A proposed edit to a live scheme, and the standing it belongs to.
+ *
+ * Fetched by the catalogue's detail pane only when an edit is waiting. The
+ * payload is the whole scheme again and is untyped on purpose: it is a snapshot
+ * of whatever the submit payload looked like when it was filed, which is not
+ * guaranteed to match today's shape. A cast would let a field this panel has
+ * never heard of render as "undefined" in the one view a reviewer uses to decide
+ * whether to publish it.
+ */
+export interface Revision {
+  revision_id: string
+  submitted_by: string
+  submitted_at: string
+  payload: Record<string, unknown>
+  decided_at?: string
+  outcome?: ReviewStatus
+  note?: string
+}
+
+export interface ReviewState {
+  scholarship_id: string
+  status: string
+  review_status: ReviewStatus
+  listing_state: ListingState
+  review_note?: string
+  pending_revision?: Revision
 }

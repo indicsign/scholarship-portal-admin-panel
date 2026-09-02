@@ -18,9 +18,13 @@ import { Field } from '../components/ui'
  * change any signed-in account's password without knowing it.
  */
 export default function SetPassword() {
-  const { setPassword, signOut, context } = useAuth()
+  const { setPassword, signOut, context, account } = useAuth()
   const [next, setNext] = useState('')
   const [again, setAgain] = useState('')
+  /* Asked for only when the account has none. Somebody whose password an admin
+     has just reset already signs in with one. */
+  const needsUsername = !account?.username
+  const [username, setUsername] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -29,13 +33,22 @@ export default function SetPassword() {
   // two different things is a poor use of anybody's time.
   const tooShort = next.length > 0 && next.length < 12
   const mismatch = again.length > 0 && next !== again
-  const ready = next.length >= 12 && next === again
+
+  /* The same rule as migration 0012's CHECK and the server's validator: a
+     leading letter so it can never be read as a mobile number, and no @ so it
+     can never be read as an email address. Checked here so the answer arrives
+     before a round trip, not instead of the server checking it. */
+  const HANDLE = /^[a-z][a-z0-9._-]{2,31}$/
+  const badUsername = username.length > 0 && !HANDLE.test(username)
+  const usernameOk = !needsUsername || HANDLE.test(username)
+
+  const ready = next.length >= 12 && next === again && usernameOk
 
   async function save() {
     setBusy(true)
     setError(null)
     try {
-      await setPassword(next)
+      await setPassword(next, needsUsername ? username : undefined)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'It could not be saved.')
     } finally {
@@ -50,6 +63,7 @@ export default function SetPassword() {
         <p>
           You signed in with a temporary password. It stops working 24 hours
           after it was issued, so choose one of your own now.
+          {needsUsername && ' Pick a username while you are here — you will be able to sign in with either it or your email address.'}
           {context?.role && ' Nothing else is available until you do.'}
         </p>
 
@@ -58,6 +72,33 @@ export default function SetPassword() {
         <form
           onSubmit={e => { e.preventDefault(); if (ready) void save() }}
         >
+          {needsUsername && (
+            <Field
+              label="Username"
+              required
+              hint="Three to thirty-two characters, starting with a letter. Lower case, and dots, dashes or underscores are allowed."
+              error={badUsername
+                ? 'Start with a letter, then letters, numbers, dots, dashes or underscores.'
+                : undefined}
+            >
+              {props => (
+                <input
+                  {...props}
+                  autoFocus
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  value={username}
+                  /* Lower-cased as it is typed rather than refused afterwards:
+                     the column is citext, so "Admin" and "admin" are the same
+                     name, and rejecting the capital would be pedantry about a
+                     distinction the database does not make. */
+                  onChange={e => setUsername(e.target.value.toLowerCase().trim())}
+                  placeholder="your.name"
+                />
+              )}
+            </Field>
+          )}
           <Field
             label="New password"
             required

@@ -85,8 +85,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  const setPassword = useCallback(async (newPassword: string) => {
-    await api.post('/auth/password/initial', { new_password: newPassword })
+  const setPassword = useCallback(async (newPassword: string, username?: string) => {
+    await api.post('/auth/password/initial', {
+      new_password: newPassword,
+      // Omitted rather than sent empty: the server asks for one only when the
+      // account has none, and an empty string would read as a bad answer to a
+      // question it never put.
+      username: username?.trim() || undefined,
+    })
     // The account no longer owes a change, so the rest of the application opens.
     // No re-login: setting a password revokes other sessions, not this one.
     setState(s => ({ ...s, status: 'authenticated', error: null }))
@@ -111,9 +117,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     ;(async () => {
       try {
-        const res = await api.request<{ data: LoginResult }>('/auth/refresh', {
-          method: 'POST', raw: true,
-        })
+        // Through the shared refresh, never directly: StrictMode mounts this
+        // effect twice, and two refreshes with one cookie is a replay to the
+        // server, which revokes the whole family. See api.refreshSession.
+        const res = await api.refreshSession<{ data: LoginResult }>()
+        if (!res) throw new Error('no session')
         if (!cancelled) applyLogin(res.data)
       } catch {
         if (!cancelled) setState(s => ({ ...s, status: 'anonymous' }))

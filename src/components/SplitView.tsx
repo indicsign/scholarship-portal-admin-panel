@@ -66,12 +66,16 @@ export default function SplitView({
  * then has to reimplement badly.
  */
 export function QueueItem({
-  name, sub, side, selected, onSelect,
+  name, sub, side, lead, selected, onSelect,
 }: {
   name: React.ReactNode
   sub?: React.ReactNode
   /** A status pill or a waiting time — the one thing worth scanning down. */
   side?: React.ReactNode
+  /* Something identifying at the start of the row — a sponsor's mark. Optional,
+     and the row keeps its two-column shape without one: an empty gutter on
+     every queue that has no marks would indent them all for nothing. */
+  lead?: React.ReactNode
   selected: boolean
   onSelect: () => void
 }) {
@@ -87,7 +91,13 @@ export function QueueItem({
 
   return (
     <li>
-      <button ref={ref} aria-current={selected || undefined} onClick={onSelect}>
+      <button
+        ref={ref}
+        className={lead ? 'has-lead' : undefined}
+        aria-current={selected || undefined}
+        onClick={onSelect}
+      >
+        {lead && <span className="queue-lead">{lead}</span>}
         <span className="queue-name">{name}</span>
         {side && <span className="queue-side">{side}</span>}
         {sub && <span className="queue-sub">{sub}</span>}

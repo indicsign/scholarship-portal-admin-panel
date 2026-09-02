@@ -21,6 +21,15 @@
   --bg: #f6f7f9;
   --surface: #ffffff;
   --surface-sunken: #f0f2f5;
+
+  /* The ground behind a document under review. Dark in BOTH themes, which is
+     why it is defined once here and not in the dark block below: a scanned
+     certificate is white with a wide margin, and on a light surface its edges
+     vanish — so a reviewer cannot tell a cropped scan from a whole one. The
+     two text colours are for the states drawn on top of it. */
+  --doc-ground: #1c1f24;
+  --doc-ground-text: #d6d9de;
+  --doc-ground-link: #9fc0ff;
   --border: #d5d9e0;
   /* 3.09:1 against --surface — the 1.4.11 floor for a control boundary. */
   --border-strong: #8e8c95;
@@ -204,8 +213,17 @@ body {
 :root { --rail: 3.5rem; --rail-open: 15rem; }
 
 .shell {
-  display: grid;
-  grid-template-columns: var(--rail) 1fr;
+  /* Not a grid, and that was a real bug rather than a preference.
+   *
+   * The sidebar is absolutely positioned so the rail can widen over the content
+   * instead of pushing it — which takes it out of flow entirely. A grid with
+   * `var(--rail) 1fr` therefore had one in-flow child and two tracks: .col was
+   * auto-placed into the 3.5rem rail track, overflowed it at roughly its
+   * min-content width, and left the 1fr track empty. That is the narrow column
+   * of clipped cards on the left with three quarters of the window unused.
+   *
+   * The space the rail occupies is reserved by a margin on the content instead,
+   * which is what "something out of flow sits here" actually looks like. */
   min-height: 100%;
   /* The widening sidebar is positioned against this. */
   position: relative;
@@ -214,9 +232,19 @@ body {
  * A measured value would track a wrapped banner exactly, but a wrapped banner
  * only happens at widths where the table scrolls in its own box anyway. */
 .shell.with-banner { --sticky-top: 2.4rem; }
-@media (max-width: 60rem) { .shell { grid-template-columns: 1fr; } }
 
-.col { display: flex; flex-direction: column; min-width: 0; }
+.col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-inline-start: var(--rail);
+}
+
+/* As a bar rather than a rail the sidebar is back in flow, stacked above the
+ * content, so there is nothing to reserve room for. */
+@media (max-width: 60rem) {
+  .col { margin-inline-start: 0; }
+}
 
 /* --- the rail ---------------------------------------------------------------
  *
@@ -225,12 +253,21 @@ body {
  * reflow a wide table under the reader's cursor every time they crossed the
  * left edge, which costs more than the width it buys back.
  *
- * position: absolute with a fixed left edge and no `right`, so the width is free
- * to animate without the grid recomputing anything. The grid column stays at
- * --rail throughout, which is what keeps the content still. */
+ * Fixed, with a set left edge and no `right`, so the width is free to animate
+ * without anything else recomputing. The margin reserving its space on .col
+ * stays at --rail throughout, which is what keeps the content still.
+ *
+ * Fixed rather than absolute, and that was a bug rather than a preference:
+ * absolute positioned it against .shell, which is as tall as the document, so
+ * the rail was a page-height box whose top scrolled out of view. The navigation
+ * disappeared exactly when somebody working down a long table wanted it.
+ *
+ * top follows --sticky-top so the rail starts below the impersonation banner
+ * during a support session rather than underneath it. */
 .sidebar {
-  position: absolute;
-  inset-block: 0;
+  position: fixed;
+  top: var(--sticky-top, 0);
+  bottom: 0;
   left: 0;
   width: var(--rail);
   z-index: 30;
@@ -265,8 +302,12 @@ body {
  * above the bar breakpoint it simply stays open. Rare — a touchscreen laptop —
  * but the alternative is ten unlabelled glyphs and no way to read them. */
 @media (hover: none) and (min-width: 60.0625rem) {
-  .shell { grid-template-columns: var(--rail-open) 1fr; }
+  /* The one case that is a real two-column layout: the sidebar is in flow and
+   * permanently open, so it occupies a track and the margin below would count
+   * the rail twice. */
+  .shell { display: grid; grid-template-columns: var(--rail-open) 1fr; }
   .sidebar { position: static; width: auto; }
+  .col { margin-inline-start: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .sidebar { transition: none; }
@@ -340,7 +381,32 @@ body {
 }
 .brand-text small { display: block; font-weight: 400; color: var(--text-muted); font-size: 12px; }
 
-.nav { display: flex; flex-direction: column; gap: 2px; }
+/* The rail is the height of the screen now, not of the page, so a nav longer
+ * than the viewport scrolls inside it rather than being cut off at the fold.
+ *
+ * min-height: 0 is what makes that work: a flex child will not shrink below its
+ * content without it, so the nav would grow past the rail and be clipped rather
+ * than becoming scrollable. The 2px padding keeps a focus ring off the edge of
+ * the scroll box — the same guard the bar layout below already needed. */
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Explicitly hidden, because overflow-y alone computes overflow-x to auto as
+   * well — and the labels are still laid out at full width while the rail is
+   * collapsed (faded, not removed, so a screen reader still reads them). That
+   * put a horizontal scrollbar along the bottom of a 3.5rem rail. The sidebar
+   * used to clip it silently; now that the nav is the scroll container, it has
+   * to say so itself.
+   *
+   * Bar mode overrides this with .sidebar .nav, which is more specific. */
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  padding: 2px;
+}
 
 /* --- the groups -------------------------------------------------------------
  *
@@ -406,8 +472,21 @@ body {
 .nav-icon { flex: none; display: grid; place-items: center; width: 1.25rem; }
 .nav-icon .icon { display: block; }
 .nav-label { flex: 1; min-width: 0; }
+/* The tint arrives rather than snapping. Same 120ms ease the rail and the
+ * labels use, so moving between sections reads as one movement instead of three
+ * separate repaints. The reduced-motion block at the top of this file clamps
+ * every duration here to nothing, so this costs a user who asked for stillness
+ * exactly what it should. */
+.nav a { transition: background-color 120ms ease, color 120ms ease; }
 .nav a:hover { background: var(--surface-sunken); }
 .nav a[aria-current="page"] { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+
+/* The current section's glyph carries the accent with its label — currentColor
+ * does that on its own — and grows just enough to be findable in the corner of
+ * the eye while the rail is collapsed to glyphs alone. A transform, not a size
+ * change: it cannot reflow the row it is in. */
+.nav .icon { transition: transform 140ms ease; }
+.nav a[aria-current="page"] .icon { transform: scale(1.1); }
 .nav .count {
   flex: none;
   font: 600 11px/1 var(--mono);
@@ -603,7 +682,15 @@ html:not([data-theme="light"]) .avatar {
   padding: clamp(0.75rem, 2vw, 1.25rem) clamp(0.75rem, 2.5vw, 2rem) 3rem;
   min-width: 0;
   width: 100%;
-  max-width: 96rem;
+
+  /* No max-width. There was a 96rem cap here, on the argument that a table row
+   * spanning two thousand pixels is one glance too wide — and that argument is
+   * not wrong, but it was paying for it with a band of empty window on every
+   * monitor past 1592px, which reads as a rendering fault rather than as
+   * restraint.
+   *
+   * What actually needed bounding was prose, and prose is bounded where it
+   * lives: .page-head p is 62ch, .stat .sub is 46ch. A table wants the width. */
 
   /* The measuring stick for everything inside.
    *
@@ -708,14 +795,85 @@ html:not([data-theme="light"]) .avatar {
   font-size: 12px;
   color: var(--text-muted);
 }
-.queue .queue-side { justify-self: end; }
+.queue .queue-side { justify-self: end; display: flex; gap: 0.3rem; align-items: center; }
+
+/* A row carrying a mark. Three columns, and the sub-line starts at the second
+ * so it stays aligned under the name rather than under the logo.
+ *
+ * The mark spans both rows of the row's own grid, so it sits against the name
+ * and the sub together rather than floating beside the first line. */
+.queue button.has-lead { grid-template-columns: auto 1fr auto; }
+.queue button.has-lead .queue-sub { grid-column: 2 / -1; }
+.queue .queue-lead {
+  grid-row: 1 / -1;
+  align-self: center;
+  flex: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.queue .queue-lead img { max-width: 100%; max-height: 100%; object-fit: contain; }
+/* The stand-in when a sponsor has no mark. Recessive on purpose — it is there
+ * to hold the column, not to compete with the marks beside it. */
+.queue .queue-initial {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font: 700 11px/1 var(--font);
+}
 
 /* --- the detail pane -------------------------------------------------------- */
 
 /* The pane is itself a container: its fields ask how wide *it* is. */
 .detail { container: pane / inline-size; }
 .detail > header { align-items: flex-start; }
-.detail-title { margin: 0; font-size: 16px; letter-spacing: -0.01em; }
+/* The subject of the pane, not a section label.
+ *
+ * text-transform and color are reset explicitly because `.card > header h2` is
+ * more specific than this class and styles every card heading as an uppercase
+ * muted caption — right for "AS OF NOW", wrong for a scholarship's name. This
+ * class already overrode the size and letter-spacing and stopped there, so a
+ * title somebody typed as "Scholarship Award" was rendered SCHOLARSHIP AWARD in
+ * the recessive ink. */
+/* Scoped under .detail > header deliberately, and this is the whole point of
+ * the rule rather than tidiness.
+ *
+ * `.card > header h2` is (0,1,2) and a bare `.detail-title` is (0,1,0), so the
+ * class lost every declaration it made — the 16px, the letter-spacing, all of
+ * it. Every detail pane in the panel was rendering its subject in the uppercase
+ * muted 13px meant for a section caption like "AS OF NOW", so a scholarship
+ * typed as "Scholarship Award" appeared as SCHOLARSHIP AWARD. Two classes and
+ * an element is (0,2,1), which wins. */
+.detail > header .detail-title {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: var(--text);
+}
+/* The mark in a detail header.
+ *
+ * Smaller than the form's preview and without its chequerboard: at this size
+ * the pattern is busier than the logo, and the header already sits on a solid
+ * surface so a transparent PNG has something to be seen against. `contain`
+ * because a sponsor's mark is usually wider than it is tall and cropping one to
+ * a square shows half a word. */
+.detail-logo {
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.detail-logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .detail-sub { margin: 0.15rem 0 0; font-size: 12px; color: var(--text-muted); }
 .detail-body { padding: 0.75rem; }
 .detail-actions {
@@ -743,6 +901,60 @@ html:not([data-theme="light"]) .avatar {
   .detail-fields { grid-template-columns: 1fr; gap: 0.1rem; }
   .detail-fields dd { margin-bottom: 0.45rem; }
 }
+
+/* A subheading inside the detail pane.
+ *
+ * The review pane is the first with more than one section in it — what is live,
+ * what is being proposed, what was said last time — and sections need headings
+ * or the pane is one undifferentiated column. Sized down from the h2 above it so
+ * the hierarchy is real rather than asserted by the tag alone. */
+.detail-heading {
+  margin: 0.9rem 0 0.4rem;
+  font-size: 12px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.detail-body > section:first-of-type .detail-heading { margin-top: 0; }
+
+/* --- a reviewer's note ------------------------------------------------------------
+ * What the platform team said to a publisher, quoted back.
+ *
+ * A blockquote because that is what it is: somebody's words, shown to the person
+ * they were written for, and neither side should be in any doubt that the
+ * platform is not paraphrasing. Never clamped to a line count — this text is the
+ * whole instruction for what to fix, and a scheme sits in the queue forever when
+ * half of it is behind an ellipsis. */
+.review-note {
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  border-left: 3px solid var(--warn);
+  background: var(--surface-sunken);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: 13px;
+  /* A pasted note can carry a URL longer than the pane. */
+  overflow-wrap: anywhere;
+}
+/* pre-wrap so a note written as two paragraphs reads as two paragraphs. An
+ * operator who pressed Enter meant it. */
+.review-note p { margin: 0 0 0.3rem; white-space: pre-wrap; }
+.review-note footer { font-size: 11px; }
+
+/* --- the decision step -----------------------------------------------------------
+ * The note box, once an action has been chosen.
+ *
+ * Set apart from the pane above it because it is a different mode: everything
+ * above is being read, and this is being written. The tint is what stops the
+ * textarea reading as one more field of the record. */
+.decide {
+  margin-top: 0.75rem;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+.decide h3 { margin: 0 0 0.5rem; font-size: 14px; }
+.decide .field { margin: 0; }
+.decide textarea { width: 100%; }
 
 /* Shown only in the one-column case, where the detail replaces the list. */
 .detail-back-row { display: none; }
@@ -809,6 +1021,64 @@ html:not([data-theme="light"]) .avatar {
 .grid { display: grid; gap: 0.75rem; }
 .grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr)); }
 .grid.cols-4 { grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr)); }
+
+/* Inside a dialog the floor has to come down.
+ *
+ * A dialog is 34rem wide and its body is padded by 1rem, leaving 32rem. Two
+ * 20rem columns and a 0.75rem gap need 40.75rem, so auto-fit quietly resolved
+ * every cols-2 in every dialog to a single column — the pairs of fields that
+ * read as "these two belong together" have been stacking all along, and the
+ * class was contributing nothing but its gap.
+ *
+ * 13rem is the largest floor that fits two columns in a dialog. On a card the
+ * 20rem rule above still applies, which is what keeps a form field from being
+ * narrower than the words in its own label. */
+dialog .grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(min(13rem, 100%), 1fr)); }
+
+/* The wide variant, for the authoring forms.
+ *
+ * Its pairing is a fixed two columns rather than auto-fit. At 50rem of content
+ * auto-fit finds room for three 13rem tracks and puts three fields on a row,
+ * which breaks the pairs the grid exists to express — "sponsor and kind of
+ * sponsor belong together" stops being visible the moment a third joins them. */
+dialog.wide { width: min(52rem, calc(100vw - 2rem)); }
+dialog.wide .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 44rem) {
+  dialog.wide .grid.cols-2 { grid-template-columns: 1fr; }
+}
+
+/* A section heading in a form, with its landmark.
+ *
+ * The rule above it does the separating, so the heading itself only has to be
+ * findable while scrolling — which is what the icon is for. Extra top margin on
+ * everything but the first, so sections read as separated rather than as one
+ * list with bold rows in it. */
+.sub-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+.sub-head:first-of-type { padding-top: 0; border-top: 0; }
+.sub-head .icon { flex: none; opacity: 0.7; width: 15px; height: 15px; }
+
+/* What is still missing, beside the button that is waiting for it.
+ *
+ * Two weights rather than one colour. All-amber read as an alarm and was the
+ * faintest text on the screen; the label carries the warning and the list is
+ * ordinary body ink, which is both easier to read and more accurate — the list
+ * is instructions, not a fault. */
+.foot-missing {
+  margin: 0;
+  margin-right: auto;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+  max-width: 40ch;
+  text-align: left;
+}
+.foot-missing strong { font-weight: 700; color: var(--warn); }
 
 .stat { padding: 0.75rem; }
 .stat dl { margin: 0; }
@@ -949,7 +1219,13 @@ button, .btn {
   min-height: 30px;
 }
 button:hover:not(:disabled) { background: var(--surface-sunken); }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Opacity alone, on a variant with its own background, cannot be checked:
+ * half-strength white over a half-strength accent lands on whatever is behind
+ * the button, so the contrast is a property of the page rather than of the
+ * rule. Stated colours instead — and stated after the variants below, because
+ * button:disabled and button.primary are both (0,1,1) and source order is what
+ * decides between them. */
+button:disabled { cursor: not-allowed; }
 
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 button.primary:hover:not(:disabled) { filter: brightness(1.08); }
@@ -957,6 +1233,20 @@ button.danger { color: var(--danger); border-color: currentColor; }
 button.subtle { border-color: transparent; background: transparent; color: var(--text-muted); }
 button.subtle:hover:not(:disabled) { background: var(--surface-sunken); color: var(--text); }
 button.sm { padding: 0.25rem 0.5rem; font-size: 12px; min-height: 26px; }
+
+/* After the variants, so this wins the tie on order rather than needing a
+ * specificity fight with each of them. A disabled control looks the same
+ * whatever it would have been enabled: it is not a quieter primary, it is a
+ * button that is not available, and saying that once is clearer than three
+ * faded versions of three different colours. */
+button:disabled,
+button.primary:disabled,
+button.danger:disabled,
+button.subtle:disabled {
+  background: var(--surface-sunken);
+  border-color: var(--border);
+  color: var(--text-faint);
+}
 
 input, select, textarea {
   font: 400 13px/1.4 var(--font);
@@ -970,8 +1260,22 @@ input, select, textarea {
 }
 textarea { resize: vertical; min-height: 4.5rem; }
 
-.field { display: grid; gap: 0.25rem; margin-bottom: 0.75rem; }
+/* align-content: start is load-bearing, not tidying.
+ *
+ * Two .field grids side by side in .grid.cols-2 stretch to a common height, and
+ * a grid's implicit rows stretch with it — so a field of label+select, paired
+ * with one of label+input+hint, grows its own two rows to absorb the third.
+ * The select comes out taller than the input beside it and lower than its own
+ * label leads you to expect. With start, the rows keep their natural height and
+ * the slack falls to the bottom where it is invisible. */
+.field { display: grid; align-content: start; gap: 0.25rem; margin-bottom: 0.75rem; }
 .field label { font-size: 12px; font-weight: 600; }
+/* The required marker, in the danger ink.
+ *
+ * Colour is not the only signal and must not be: the glyph itself is the mark,
+ * and a visually hidden "(required)" follows it for anyone who cannot see
+ * either. Red only makes it scannable down a column of twenty labels. */
+.field label .req { color: var(--danger); }
 .field .hint { font-size: 12px; color: var(--text-muted); }
 .field .error { font-size: 12px; color: var(--danger); font-weight: 500; }
 .field input[aria-invalid="true"],
@@ -979,6 +1283,37 @@ textarea { resize: vertical; min-height: 4.5rem; }
 
 .filters { display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap; }
 .filters .field { margin: 0; min-width: 9rem; }
+/* A free-text field takes whatever the selects beside it do not want. At the
+ * shared 9rem floor a search box truncates its own placeholder while the row
+ * has room to spare. */
+.filters .field.grow { flex: 1 1 12rem; }
+
+/* The logo preview.
+ *
+ * A fixed square with the picture contained rather than covering it: a sponsor's
+ * mark is usually wider than it is tall, and cropping one to fill a square is
+ * how a logo ends up showing half a word. The chequerboard is what makes a
+ * transparent PNG legible against either theme — without it a white mark on
+ * transparency is invisible in light mode and a dark one vanishes in dark. */
+.logo-preview {
+  flex: none;
+  width: 5.5rem;
+  height: 5.5rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background-color: var(--surface-sunken);
+  background-image:
+    linear-gradient(45deg, var(--border) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--border) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--border) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--border) 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+}
+.logo-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
 
 /* --- banner ------------------------------------------------------------------------
  * The impersonation banner. Deliberately loud and deliberately unmissable:
@@ -1040,6 +1375,44 @@ dialog .foot { padding: 0.75rem 1rem; border-top: 1px solid var(--border); displ
 .login .lede { color: var(--text-muted); font-size: 13px; margin: 0 0 1rem; }
 
 /* --- misc ------------------------------------------------------------------------------------- */
+
+/* A heading inside a card or a dialog, under the card's own header. Matches the
+ * org portal's, which is where the rule editor below was first written. */
+.sub-head {
+  margin: 1rem 0 0.4rem;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+/* One eligibility rule while it is being written. Boxed because a rule is three
+ * controls and a sentence that belong to each other, and an unboxed list of them
+ * reads as one long form where the author cannot see where a rule ends. */
+.rule {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem;
+  margin-bottom: 0.6rem;
+  background: var(--surface-sunken);
+}
+.rule .field { margin-top: 0.5rem; }
+
+/* A condition reads as one line — field, comparison, value, unit — and then the
+ * Remove at the far end. The global `input, select { width: 100% }` is right
+ * for a stacked form field and wrong here: in a flex row it makes every control
+ * claim the full width, so three of them wrap onto three lines and a rule that
+ * is one sentence looks like three unrelated questions.
+ *
+ * Checkboxes are excluded because the tag and disability pickers put theirs
+ * inside nested .row labels, where the sizing above is already correct. */
+.rule .row > select,
+.rule .row > input:not([type="checkbox"]) {
+  width: auto;
+  flex: 0 1 auto;
+}
+.rule .row > select { min-width: 8rem; max-width: 15rem; }
+
 
 .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 .muted { color: var(--text-muted); }
@@ -1339,3 +1712,94 @@ kbd {
 }
 
 :root[data-theme="light"] { color-scheme: light; }
+
+/* --- the document under review ----------------------------------------------
+ * The preview in the verification pane.
+ *
+ * Sized in viewport height rather than a fixed pixel box: this is the thing the
+ * operator is reading, so it should take what the screen can give it. The floor
+ * stops it collapsing to a sliver in the split view on a laptop, and the ceiling
+ * keeps the decision controls reachable without scrolling past the document —
+ * which matters because the reason box is where what was just read gets written
+ * down.
+ *
+ * A dark ground rather than the card's own: a scanned certificate is usually
+ * white with a wide margin, and on a white surface its edges disappear, so the
+ * reviewer cannot tell a cropped scan from a full one. */
+
+.doc-preview {
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--doc-ground);
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 18rem;
+  height: min(58vh, 40rem);
+}
+.doc-preview img {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain;
+}
+.doc-preview iframe {
+  width: 100%; height: 100%;
+  border: 0;
+  /* A PDF viewer draws its own white page; the dark ground behind it is for the
+     image case and would show as a band around a short document. */
+  background: var(--surface);
+}
+/* The unsupported-type and error cases are text on that dark ground, so they
+   need their own colour rather than the muted grey used on a card. */
+.doc-preview .muted,
+.doc-preview .loading {
+  color: var(--doc-ground-text);
+  padding: 1rem;
+  text-align: center;
+}
+.doc-preview a { color: var(--doc-ground-link); }
+
+/* --- the verified badge -----------------------------------------------------
+ * Marks a fact somebody has attested to, on a profile field and on a document
+ * alike.
+ *
+ * Blue rather than the green a tick usually gets: green here would read as
+ * "good", and a verification is not a compliment — it says a person checked
+ * this against evidence. Blue is the accent already used for "the platform
+ * says so" throughout the panel.
+ *
+ * The tick and the word both ship. Colour alone would put the entire difference
+ * between "they claim 83%" and "somebody confirmed 83%" into a hue, which
+ * WCAG 1.4.1 forbids and a monochrome print loses. */
+
+.verified-badge {
+  display: inline-flex; align-items: center; gap: 0.2rem;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: var(--accent-weak);
+  color: var(--accent);
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  /* Never the thing that wraps: a badge alone on a line reads as a heading for
+     whatever follows it. */
+  white-space: nowrap; vertical-align: middle;
+}
+.verified-badge svg { flex: none; }
+
+/* "waiting" beside a document tab, and the tick on a decided one. The panel's
+   tabs carry no badge of their own — these are the first to need one. */
+.tab-count {
+  margin-left: 0.35rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--warn-weak);
+  color: var(--warn);
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+
+/* A tick on a document tab, where there is no room for the word. The tab's own
+   label names the document, and the pane it opens states the verification in
+   full — so this is a marker for scanning, not the only carrier of the fact. */
+.tab-tick { color: var(--accent); font-weight: 700; }

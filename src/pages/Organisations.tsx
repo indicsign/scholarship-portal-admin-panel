@@ -2,12 +2,14 @@ import { useState } from 'react'
 
 import * as api from '../lib/api'
 import { useAuth } from '../lib/auth-context'
-import { date, humanise } from '../lib/format'
+import { count, date, humanise } from '../lib/format'
 import { Empty, ErrorState, Field, Loading, Pager, StatusPill } from '../components/ui'
 import SplitView, { DetailEmpty, QueueItem } from '../components/SplitView'
+import { Stat } from '../components/charts'
+import LogoField from '../components/LogoField'
 import { useQuery } from '../lib/hooks'
 import { useAnnounce, type Tone } from '../lib/announce'
-import type { Organisation } from '../lib/types'
+import type { Organisation, OrganisationCounts } from '../lib/types'
 
 /* The organisation approval queue.
  *
@@ -37,7 +39,11 @@ export default function Organisations() {
   const { can } = useAuth()
   const announce = useAnnounce()
 
-  const [status, setStatus] = useState<string>('PENDING_APPROVAL')
+  /* Every organisation, not just the ones waiting. The queue is still one
+     click away and the tile above says how many are in it; defaulting to it
+     meant an operator looking a tenant up got an empty screen whenever the
+     queue happened to be clear. */
+  const [status, setStatus] = useState<string>('')
   const [orgType, setOrgType] = useState('')
   const [page, setPage] = useState(1)
   /* What the operator last clicked — an intent, not the answer. */
@@ -48,6 +54,14 @@ export default function Organisations() {
       status, org_type: orgType, page, page_size: 25,
     }, signal),
     [status, orgType, page],
+  )
+
+  /* Its own request, and deliberately not derived from the rows above: those
+     are one filtered page, so a count taken from them would only ever describe
+     what is already on screen. */
+  const counts = useQuery<OrganisationCounts>(
+    signal => api.get('/admin/organisations/counts', undefined, signal),
+    [],
   )
 
   const rows = query.data ?? []
@@ -92,6 +106,33 @@ export default function Organisations() {
           </p>
         </div>
       </div>
+
+      {counts.data && (
+        <div className="grid cols-4" style={{ marginBottom: '0.75rem' }}>
+          <Stat
+            label="Registered"
+            value={count(counts.data.total)}
+            sub="Organisations that have applied to use the platform"
+          />
+          <Stat
+            label="Awaiting a decision"
+            value={count(counts.data.pending)}
+            sub={counts.data.pending > 0
+              ? 'Each one is waiting on somebody here'
+              : 'Nothing is waiting'}
+          />
+          <Stat
+            label="Approved"
+            value={count(counts.data.approved)}
+            sub="May publish schemes and read applicants' certificates"
+          />
+          <Stat
+            label="Refused or stopped"
+            value={count(counts.data.rejected + counts.data.suspended)}
+            sub={`${count(counts.data.rejected)} rejected, ${count(counts.data.suspended)} suspended`}
+          />
+        </div>
+      )}
 
       <SplitView
         showDetailOnNarrow={opened}
@@ -193,6 +234,9 @@ export default function Organisations() {
               onDone={(message, tone) => {
                 announce(message, tone)
                 query.reload()
+                // The tiles move with the decision. Reloading only the rows
+                // would leave "Awaiting a decision" reading one too many.
+                counts.reload()
               }}
             />
           ) : (
@@ -314,6 +358,27 @@ function Detail({
             </>
           )}
         </dl>
+
+        {canDecide && (
+          <>
+            <h3 className="sub-head">Logo</h3>
+            <LogoField
+              endpoint={`/admin/organisations/${org.organisation_id}/logo`}
+              publicPath={`/public/organisations/${org.organisation_id}/logo`}
+              hasLogo={!!org.has_logo}
+              alt={org.logo_alt}
+              defaultAlt={org.name}
+              /* The pane is derived from the list, so refreshing the list is
+                 what makes a new logo appear here. */
+              onChange={present => onDone(
+                present
+                  ? `${org.name}'s logo was updated.`
+                  : `${org.name}'s logo was removed.`,
+                present ? 'ok' : 'warn',
+              )}
+            />
+          </>
+        )}
 
         {/* Stated where the decision is made, not in a modal after it. What an
             approval actually grants is the whole substance of the decision. */}

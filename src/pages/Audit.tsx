@@ -12,15 +12,20 @@ import type { AuditEntry } from '../lib/types'
  * every state transition and every privileged read to be permanently logged and
  * attributable. This is where that is read.
  *
- * The default view is deliberately the refused actions rather than everything.
- * A successful login is the overwhelming majority of rows and almost never the
- * thing anybody opened this screen to find; a denied one is.
+ * The screen opens on everything. It used to open on refusals alone, reasoning
+ * that a successful login is the overwhelming majority of rows and a denied one
+ * is what people come here for — true of why the Outcome filter exists, and not
+ * a reason to hide the rest before anybody has asked. A trail that opens
+ * pre-filtered shows an empty table whenever the chosen slice is empty, with
+ * nothing to say that a filter rather than an absence of activity produced it,
+ * and "what did this operator do on Tuesday" is not answerable from it without
+ * first noticing the filter and clearing it.
  */
 
 const OUTCOMES = ['DENIED', 'SUCCESS', 'ERROR'] as const
 
 export default function Audit() {
-  const [outcome, setOutcome] = useState<string>('DENIED')
+  const [outcome, setOutcome] = useState<string>('')
   const [action, setAction] = useState('')
   const [subjectType, setSubjectType] = useState('')
   const [page, setPage] = useState(1)

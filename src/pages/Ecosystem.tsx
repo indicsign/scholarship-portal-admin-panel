@@ -30,6 +30,16 @@ export default function Ecosystem() {
   const { report, note } = query.data
   const t = report.totals
 
+  /* Defaulted, though the API is also fixed not to send null.
+   *
+   * The declared type is Underserved[], so nothing in the typecheck stands
+   * between a null on the wire and .filter on the next line — and the panel has
+   * no error boundary, so that throw unmounts the root and blanks every screen,
+   * not this one. A report is not worth the whole panel. */
+  const byDisability = report.underserved_by_disability ?? []
+  const byDistrict = report.underserved_by_district ?? []
+  const undersubscribed = report.undersubscribed_schemes ?? []
+
   return (
     <>
       <div className="page-head">
@@ -84,13 +94,13 @@ export default function Ecosystem() {
           <UnderservedTable
             title="Under-served by disability"
             caption="Students on the platform against sanctions received. A low ratio means the students are here and the funding is not reaching them."
-            rows={report.underserved_by_disability}
+            rows={byDisability}
             note={note}
           />
           <UnderservedTable
             title="Under-served by district"
             caption="The same measure by place."
-            rows={report.underserved_by_district}
+            rows={byDistrict}
             note={note}
           />
         </div>
@@ -103,7 +113,7 @@ export default function Ecosystem() {
             </span>
           </header>
 
-          {report.undersubscribed_schemes.length === 0 ? (
+          {undersubscribed.length === 0 ? (
             <Empty title="Nothing under-subscribed" hint="Every open scheme has its budget committed." />
           ) : (
             <div className="table-wrap">
@@ -121,7 +131,7 @@ export default function Ecosystem() {
                   </tr>
                 </thead>
                 <tbody>
-                  {report.undersubscribed_schemes.map(s => (
+                  {undersubscribed.map(s => (
                     <tr key={s.scholarship_id}>
                       <th scope="row" style={{ fontWeight: 500 }}>{s.title}</th>
                       <td className="truncate">{s.organisation_name}</td>

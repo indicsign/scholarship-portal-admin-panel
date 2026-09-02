@@ -4,7 +4,8 @@ import { useAuth } from '../lib/auth-context'
 import { roleLabel } from '../lib/roles'
 import { applyTheme, readTheme, type Theme } from '../lib/theme'
 import Popover from './Popover'
-import { IconCheck, IconKeyboard, IconSignOut } from './icons'
+import { IconCheck, IconKeyboard, IconSignOut, IconUsers } from './icons'
+import AccountSettings from './AccountSettings'
 
 /* Who is signed in, and the three things they might want to do about it.
  *
@@ -14,9 +15,14 @@ import { IconCheck, IconKeyboard, IconSignOut } from './icons'
  * item sidebar into scrolling. Moving the cluster here is what stopped that —
  * the icon rail is a separate change and saves width, not height.
  *
- * There is no Settings item. This panel has no settings screen, and the only
- * per-user preference in it is the theme, which is here rather than behind a
- * door that would open onto a page containing one select.
+ * There is no settings *page*, and still should not be: the only per-user
+ * preference is the theme, which is here rather than behind a door onto a screen
+ * containing one select.
+ *
+ * "Your account" is a dialog rather than a page for the same reason. It holds the
+ * two things a person owns and could not previously change — their username and
+ * their password — which had been reachable only on the way in from an
+ * invitation, leaving anybody past that step stuck with both.
  */
 
 const THEMES: { value: Theme; label: string }[] = [
@@ -28,6 +34,9 @@ const THEMES: { value: Theme; label: string }[] = [
 export default function AccountMenu({ onShortcuts }: { onShortcuts: () => void }) {
   const { account, context, signOut } = useAuth()
   const [theme, setTheme] = useState<Theme>(() => readTheme())
+  /* Your username and password. There is still no settings *page* — see the note
+     above — but there is now somewhere to change the two things a person owns. */
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const name = account?.email ?? account?.phone ?? null
   const role = roleLabel(context?.role ?? '')
@@ -38,6 +47,7 @@ export default function AccountMenu({ onShortcuts }: { onShortcuts: () => void }
   }
 
   return (
+    <>
     <Popover
       label={name ? `Account: ${name}` : 'Account'}
       className="avatar-btn"
@@ -80,6 +90,14 @@ export default function AccountMenu({ onShortcuts }: { onShortcuts: () => void }
           <div className="popover-section">
             <button
               className="popover-item"
+              onClick={() => { close(); setSettingsOpen(true) }}
+            >
+              <span className="popover-item-icon"><IconUsers /></span>
+              Your account
+            </button>
+
+            <button
+              className="popover-item"
               onClick={() => { close(); onShortcuts() }}
             >
               <span className="popover-item-icon"><IconKeyboard /></span>
@@ -94,6 +112,11 @@ export default function AccountMenu({ onShortcuts }: { onShortcuts: () => void }
         </>
       )}
     </Popover>
+
+    {/* Outside the popover, so closing the menu does not unmount the dialog the
+        menu just opened. */}
+    {settingsOpen && <AccountSettings onClose={() => setSettingsOpen(false)} />}
+    </>
   )
 }
 

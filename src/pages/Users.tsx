@@ -1,7 +1,8 @@
 import { useState } from 'react'
 
 import * as api from '../lib/api'
-import { ApiError } from '../lib/api'
+import { DocumentsDialog } from './DocumentsDialog'
+import { ApiError, errorDetail } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import { date, humanise } from '../lib/format'
 import { Dialog, Empty, ErrorState, Field, Loading, Pill, StatusPill } from '../components/ui'
@@ -89,45 +90,81 @@ export default function Users() {
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<PlatformUser | null>(null)
 
+  /* Who may see what, and who may change it.
+   *
+   * Ahead of the query, because activeTab below is in its dependency array and
+   * that array is evaluated immediately — declaring it afterwards would be a
+   * use-before-initialised error rather than untidiness.
+   *
+   * Guarded here as well as on the route and in the service. A role revoked
+   * mid-session leaves a token that still claims it until it expires, and an
+   * absent control is better than a screen of 403s.
+   *
+   * The platform tab is the super admin's alone: the server refuses that kind
+   * for anybody else, so offering it would be a door that answers 403. An
+   * administrator may act on the accounts they can see; a staff member reads
+   * them. The service enforces the real rule from the account being written —
+   * this only stops the panel offering what the API would refuse. */
+  const superAdmin = context?.role === 'SUPER_ADMIN'
+  const canManage = superAdmin || context?.role === 'ADMIN'
+
+  const visibleTabs = superAdmin ? TABS : TABS.filter(t => t.id !== 'platform')
+
+  /* 'platform' is the initial state, so a staff member would otherwise open by
+     asking the server for the one list it refuses them. Derived rather than
+     corrected by an effect, for the reason the queue screens give: a render,
+     then a second render to undo it, with a frame where the two disagree. */
+  const activeTab = visibleTabs.some(t => t.id === tab) ? tab : visibleTabs[0].id
+  const current = visibleTabs.find(t => t.id === activeTab)!
+
   const query = useQuery<PlatformUser[]>(
-    signal => api.get('/admin/accounts', { q: search, kind: tab, limit: 50 }, signal),
-    [search, tab],
+    signal => api.get('/admin/accounts', { q: search, kind: activeTab, limit: 50 }, signal),
+    [search, activeTab],
   )
 
-  // Guarded here as well as on the route. A super admin whose role is revoked
-  // mid-session keeps a token that still claims it until it expires, and this is
-  // better than a screen full of 403s.
-  if (context?.role !== 'SUPER_ADMIN') {
-    return (
-      <div className="card">
-        <Empty
-          title="Only the super admin manages users"
-          hint="You can look an account up from Support access."
-        />
-      </div>
-    )
-  }
+  /* The student whose documents are open. Held by profile rather than by
+     account: everything the vault knows is keyed on the profile, and an account
+     that never became a student has none. */
+  const [reviewing, setReviewing] = useState<PlatformUser | null>(null)
 
-  const current = TABS.find(t => t.id === tab)!
-
-  async function act(u: PlatformUser, what: 'suspend' | 'reinstate' | 'remove') {
+  async function act(
+    u: PlatformUser,
+    what: 'suspend' | 'reinstate' | 'remove' | 'reset',
+  ) {
     const who = u.email ?? u.phone ?? 'that account'
+    const wasDeactivated = u.status === 'DEACTIVATED'
+
     try {
       if (what === 'remove') {
         await api.del(`/admin/accounts/${u.user_id}`)
         announce(`${who} is deactivated. Every role and session is gone.`, 'warn')
+      } else if (what === 'reset') {
+        await api.post(`/admin/accounts/${u.user_id}/reset-password`)
+        announce(
+          `A temporary password has been emailed to ${who}. It lasts 24 hours, `
+          + 'and every other session is signed out.',
+          'ok',
+        )
       } else {
         await api.patch(`/admin/accounts/${u.user_id}`, {
           status: what === 'suspend' ? 'SUSPENDED' : 'ACTIVE',
         })
         announce(
-          what === 'suspend' ? `${who} is suspended and signed out.` : `${who} can sign in again.`,
+          what === 'suspend' ? `${who} is suspended and signed out.`
+            /* Bringing back a deactivated account is not the same act as
+               reinstating a suspended one, and saying so matters: deactivation
+               revoked every role on the way out and this does not put them
+               back, so somebody told only "can sign in again" would expect them
+               to be able to work. */
+            : wasDeactivated
+              ? `${who} is active again — but their roles were revoked when the account was deactivated. Grant them again before they can do anything.`
+              : `${who} can sign in again.`,
           what === 'suspend' ? 'warn' : 'ok',
         )
       }
       query.reload()
     } catch (err) {
-      announce(err instanceof Error ? err.message : 'It could not be saved.', 'danger')
+      announce(errorDetail(err, 'It could not be saved.'), 'danger')
     }
   }
 
@@ -141,20 +178,25 @@ export default function Users() {
         {/* Students are not created here. They register, verify a contact
           * channel and build a profile — an account made from this side would
           * have no profile and the portal would have nowhere to send them. */}
-        {tab !== 'student' && (
+        {/* Creating an account is the super admin's, whichever kind it is: the
+          * same route makes both, so offering it to an administrator would be a
+          * way to create a platform account from the organisation tab. An
+          * administrator gets a tenant's first member through approving the
+          * organisation, which creates one for them. */}
+        {superAdmin && activeTab !== 'student' && (
           <button className="primary" onClick={() => setAdding(true)}>
-            {tab === 'platform' ? 'Add to platform' : 'Add an organisation admin'}
+            {activeTab === 'platform' ? 'Add to platform' : 'Add an organisation admin'}
           </button>
         )}
       </div>
 
       <div className="tabs" role="tablist" aria-label="Kind of user">
-        {TABS.map(t => (
+        {visibleTabs.map(t => (
           <button
             key={t.id}
             role="tab"
-            aria-selected={tab === t.id}
-            className={tab === t.id ? 'tab active' : 'tab'}
+            aria-selected={activeTab === t.id}
+            className={activeTab === t.id ? 'tab active' : 'tab'}
             onClick={() => { setTab(t.id); setEditing(null) }}
           >
             {t.label}
@@ -193,7 +235,7 @@ export default function Users() {
                 <tr>
                   <th scope="col">Name or contact</th>
                   <th scope="col">Role</th>
-                  {tab === 'organisation' && <th scope="col">Organisation</th>}
+                  {activeTab === 'organisation' && <th scope="col">Organisation</th>}
                   <th scope="col">Status</th>
                   <th scope="col">Last signed in</th>
                   <th scope="col"><span className="sr-only">Actions</span></th>
@@ -203,22 +245,33 @@ export default function Users() {
                 {query.data.map(u => {
                   const dead = u.status === 'DEACTIVATED'
                   const roles = u.roles.filter(r =>
-                    tab === 'platform' ? !r.organisation_id
-                      : tab === 'organisation' ? r.organisation_id
+                    activeTab === 'platform' ? !r.organisation_id
+                      : activeTab === 'organisation' ? r.organisation_id
                         : true)
                   return (
                     <tr key={u.user_id}>
+                      {/* The name leads where there is one.
+
+                          It used to be the email or, failing that, the phone
+                          number — which for a student who registered by mobile
+                          and never gave an address meant the row read "+9178…"
+                          and nothing else. Four such rows are indistinguishable,
+                          and each carries a Documents button whose contents are
+                          somebody's disability certificate. The contact detail
+                          stays underneath, because it is what an operator
+                          searches by and what they read out on a support call. */}
                       <th scope="row" style={{ fontWeight: 600 }}>
-                        {u.email ?? u.phone ?? '—'}
-                        {u.email && u.phone && (
+                        {u.full_name ?? u.email ?? u.phone ?? '—'}
+                        {(u.full_name || (u.email && u.phone)) && (
                           <div className="faint" style={{ fontWeight: 400, fontSize: 12 }}>
-                            {u.phone}
+                            {[u.full_name && u.email, u.phone]
+                              .filter(Boolean).join(' · ')}
                           </div>
                         )}
                       </th>
                       <td>
                         {roles.length === 0 ? (
-                          <span className="faint">{tab === 'student' ? 'Student' : 'None'}</span>
+                          <span className="faint">{activeTab === 'student' ? 'Student' : 'None'}</span>
                         ) : (
                           <div className="pill-row">
                             {roles.map(r => (
@@ -232,7 +285,7 @@ export default function Users() {
                           </div>
                         )}
                       </td>
-                      {tab === 'organisation' && (
+                      {activeTab === 'organisation' && (
                         <td>
                           {roles.map(r => r.organisation_name).filter(Boolean).join(', ') || '—'}
                         </td>
@@ -248,23 +301,72 @@ export default function Users() {
                           * what inside it, from their People screen — reaching
                           * across into a tenant from here would put the platform
                           * inside the boundary the whole system exists to hold. */}
-                        {tab === 'platform' && (
-                          <button className="sm" onClick={() => setEditing(u)} disabled={dead}>
+                        {/* Enabled on a deactivated account too. Deactivation
+                          * revoked every role, so this is exactly where somebody
+                          * bringing an account back needs to grant them again —
+                          * disabling it made the revival useless. */}
+                        {activeTab === 'platform' && (
+                          <button className="sm" onClick={() => setEditing(u)}>
                             Roles<span className="sr-only"> for {u.email ?? u.phone}</span>
                           </button>
                         )}
-                        {u.status === 'SUSPENDED' ? (
-                          <button className="sm" onClick={() => act(u, 'reinstate')}>
-                            Reinstate<span className="sr-only"> {u.email ?? u.phone}</span>
-                          </button>
-                        ) : (
-                          <button className="sm" onClick={() => act(u, 'suspend')} disabled={dead}>
-                            Suspend<span className="sr-only"> {u.email ?? u.phone}</span>
+                        {/* Only where there is a student profile behind the
+                          * account. An operator cannot review documents that
+                          * cannot exist, and a button that opens an empty
+                          * dialog is worse than no button. */}
+                        {u.profile_id && (
+                          <button className="sm" onClick={() => setReviewing(u)}>
+                            Documents
+                            <span className="sr-only"> for {u.email ?? u.phone}</span>
                           </button>
                         )}
-                        <button className="sm danger" onClick={() => act(u, 'remove')} disabled={dead}>
-                          Remove<span className="sr-only"> {u.email ?? u.phone}</span>
-                        </button>
+                        {/* Absent rather than disabled for a staff member. A
+                          * greyed-out Suspend invites the question of how to
+                          * enable it; nothing there says the answer is "not with
+                          * this account". The service refuses it regardless, and
+                          * refuses an administrator acting on a platform account
+                          * whatever this renders. */}
+                        {canManage && (
+                          <>
+                            {/* Somebody who has lost their password. The new one
+                              * goes to the address on the account and never to
+                              * this screen — an administrator resetting a tenant
+                              * member's password has no business reading it.
+                              *
+                              * Absent for a deactivated account: handing a
+                              * credential to one would be a quiet way to
+                              * reanimate it, and the service refuses it. */}
+                            {!dead && (
+                              <button className="sm" onClick={() => act(u, 'reset')}>
+                                Email a password
+                                <span className="sr-only"> to {u.email ?? u.phone}</span>
+                              </button>
+                            )}
+
+                            {/* Reinstate covers both ways back: a suspended
+                              * account resumes with what it had, a deactivated
+                              * one comes back with its roles still revoked. The
+                              * announcement says which happened. */}
+                            {u.status === 'SUSPENDED' || dead ? (
+                              <button className="sm" onClick={() => act(u, 'reinstate')}>
+                                {dead ? 'Bring back' : 'Reinstate'}
+                                <span className="sr-only"> {u.email ?? u.phone}</span>
+                              </button>
+                            ) : (
+                              <button className="sm" onClick={() => act(u, 'suspend')}>
+                                Suspend<span className="sr-only"> {u.email ?? u.phone}</span>
+                              </button>
+                            )}
+
+                            {/* Nothing to remove from an account already
+                              * deactivated; the service refuses a second one. */}
+                            {!dead && (
+                              <button className="sm danger" onClick={() => act(u, 'remove')}>
+                                Remove<span className="sr-only"> {u.email ?? u.phone}</span>
+                              </button>
+                            )}
+                          </>
+                        )}
                       </td>
                     </tr>
                   )
@@ -277,7 +379,7 @@ export default function Users() {
 
       {adding && (
         <AddDialog
-          kind={tab === 'platform' ? 'platform' : 'organisation'}
+          kind={activeTab === 'platform' ? 'platform' : 'organisation'}
           onClose={() => setAdding(false)}
           onDone={msg => {
             setAdding(false)
@@ -293,6 +395,15 @@ export default function Users() {
           onClose={() => setEditing(null)}
           onChanged={msg => { announce(msg, 'ok'); query.reload() }}
           onDone={() => setEditing(null)}
+        />
+      )}
+
+      {reviewing?.profile_id && (
+        <DocumentsDialog
+          profileID={reviewing.profile_id}
+          who={reviewing.email ?? reviewing.phone ?? 'this student'}
+          onClose={() => setReviewing(null)}
+          onDone={(msg, tone) => announce(msg, tone ?? 'ok')}
         />
       )}
     </>

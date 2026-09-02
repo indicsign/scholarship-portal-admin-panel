@@ -48,6 +48,24 @@ export class ApiError extends Error {
   }
 }
 
+/* The useful half of a failure, for somewhere with room for one line.
+ *
+ * domain.ErrValidation pairs a generic sentence — "Some of the details you
+ * entered need attention." — with a map saying which detail and why. Where a
+ * caller can only show one string, the map is the one worth showing: "That file
+ * is 698 KB. Keep it under 5.0 MB." is actionable and the summary is not.
+ *
+ * Showing both is worse than showing either: the reader skips a sentence that
+ * tells them nothing to reach the one that does.
+ */
+export function errorDetail(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    const detail = Object.values(err.fields ?? {})
+    return detail.length > 0 ? detail.join(' ') : err.message
+  }
+  return err instanceof Error ? err.message : fallback
+}
+
 /** Set by the auth provider. Kept in memory only — see the note in auth.tsx. */
 let accessToken: string | null = null
 let onAuthLost: (() => void) | null = null
@@ -139,17 +157,35 @@ async function send<T>(path: string, opts: RequestOptions = {}): Promise<T> {
  * use and treats a replayed one as theft, revoking the whole family. Racing
  * refreshes would sign the operator out for no reason. */
 
-let refreshing: Promise<string | null> | null = null
+let refreshing: Promise<unknown | null> | null = null
 
-async function refresh(): Promise<string | null> {
+/* Every refresh in this application, deduped.
+ *
+ * Sharing the in-flight promise is not an optimisation, it is the difference
+ * between staying signed in and being thrown out. The server rotates the
+ * refresh token on every use and treats an already-rotated one as replay —
+ * identity.Refresh revokes the entire family and denylists every token the user
+ * holds, because a replay is either a race or a theft and it cannot tell which.
+ *
+ * So two refreshes with the same cookie end the session. The retry path below
+ * has always shared this promise; the session bootstrap did not — it called
+ * /auth/refresh directly, and React's StrictMode runs an effect twice in
+ * development, which is two refreshes a few milliseconds apart with the same
+ * cookie. That is a replay by the server's definition, and the operator was
+ * signed out shortly after signing in, with the audit log recording
+ * REFRESH_TOKEN_REPLAY against them.
+ *
+ * Returns the whole envelope rather than the token, because the bootstrap needs
+ * the account and its contexts as well.
+ */
+export async function refreshSession<T>(): Promise<T | null> {
   refreshing ??= (async () => {
     try {
       const res = await send<Envelope<{ token: { access_token: string } }>>(
         '/auth/refresh', { method: 'POST', raw: true },
       )
-      const token = res.data.token.access_token
-      setAccessToken(token)
-      return token
+      setAccessToken(res.data.token.access_token)
+      return res
     } catch {
       return null
     } finally {
@@ -159,7 +195,12 @@ async function refresh(): Promise<string | null> {
     }
   })()
 
-  return refreshing
+  return refreshing as Promise<T | null>
+}
+
+async function refresh(): Promise<string | null> {
+  const res = await refreshSession<Envelope<{ token: { access_token: string } }>>()
+  return res ? res.data.token.access_token : null
 }
 
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
@@ -191,8 +232,59 @@ export async function patch<T>(path: string, body?: unknown) {
   return request<Envelope<T>>(path, { method: 'PATCH', body })
 }
 
+/* A whole-record replacement, as against patch()'s one-field change.
+ *
+ * Both exist because the API means different things by them: PATCH carries the
+ * fields that change, PUT carries the record as it should now read. Sending a
+ * partial body to a PUT route is how a description gets erased by an edit to a
+ * title, so the caller has to have said which of the two it meant. */
+export async function put<T>(path: string, body?: unknown) {
+  return request<Envelope<T>>(path, { method: 'PUT', body })
+}
+
 export async function del<T>(path: string, body?: unknown) {
   return request<Envelope<T> | null>(path, { method: 'DELETE', body })
+}
+
+/* Binary content, with the access token attached.
+ *
+ * An <img src> cannot carry an Authorization header — there is no API for it —
+ * so anything the panel displays that a row-level policy guards has to be
+ * fetched here and handed to the element as a blob URL. Without this, a picture
+ * belonging to an unpublished row is requested anonymously and correctly
+ * refused, which looks exactly like a broken upload.
+ *
+ * One refresh-and-retry, matching request(): an operator with a stale token
+ * should see their logo, not a placeholder.
+ */
+export async function fetchBlob(path: string, signal?: AbortSignal): Promise<Blob> {
+  const send = () => fetch(`${BASE}${path}`, {
+    headers: { ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+    credentials: 'same-origin',
+    signal,
+  })
+
+  let res = await send()
+
+  if (res.status === 401) {
+    const token = await refresh()
+    if (!token) {
+      onAuthLost?.()
+      throw new ApiError(401, { code: 'UNAUTHENTICATED', message: 'Sign in again.' })
+    }
+    res = await send()
+  }
+
+  if (!res.ok) {
+    throw new ApiError(res.status, {
+      code: res.status === 404 ? 'NOT_FOUND' : 'IMAGE_UNAVAILABLE',
+      message: res.status === 404
+        ? 'There is no picture here.'
+        : `The picture could not be loaded (${res.status}).`,
+    })
+  }
+
+  return res.blob()
 }
 
 /* Multipart upload.

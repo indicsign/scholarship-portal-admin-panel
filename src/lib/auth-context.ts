@@ -18,8 +18,9 @@ export interface AuthState {
 
 export interface AuthApi extends AuthState {
   signIn(identifier: string, password: string, mfaCode?: string): Promise<void>
-  /** Replaces a temporary password. No current password: see SetInitialPassword. */
-  setPassword(newPassword: string): Promise<void>
+  /* Replaces a temporary password, and claims a username if the account has
+     none. No current password: see SetInitialPassword. */
+  setPassword(newPassword: string, username?: string): Promise<void>
   signOut(): Promise<void>
   startImpersonation(targetUserId: string, reason: string): Promise<void>
   endImpersonation(): Promise<void>

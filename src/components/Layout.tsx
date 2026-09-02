@@ -3,13 +3,18 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../lib/auth-context'
 import { rememberPlace } from '../lib/place'
+import { ErrorBoundary } from './ErrorBoundary'
 import { roleLabel } from '../lib/roles'
+import type { Role } from '../lib/types'
 import AccountMenu from './AccountMenu'
 import NotificationBell from './NotificationBell'
+import { queueFor, type QueueCounts } from '../lib/queues'
 import { Dialog } from './ui'
 import {
-  IconAudit, IconDashboard, IconDataRequests, IconEcosystem, IconGrievances,
-  IconMessages, IconOrganisations, IconSlides, IconSupport, IconUsers,
+  IconAudit, IconDashboard, IconEcosystem, IconGrievances,
+  IconMessages, IconOrganisations, IconScholarships, IconSlides, IconSupport,
+  IconVerifications,
+  IconUsers,
 } from './icons'
 import { focusPrimaryFilter, useShortcuts, type Shortcut } from '../lib/shortcuts'
 
@@ -49,7 +54,9 @@ import { focusPrimaryFilter, useShortcuts, type Shortcut } from '../lib/shortcut
  *                admitting a party to sensitive data, answering a statutory
  *                right, resolving a complaint about somebody who cannot be
  *                trusted to notice it themselves. These are the daily job.
- *   Published    copy that reaches people who are not in this room.
+ *   Published    copy that reaches people who are not in this room. The
+ *                scholarships themselves are NOT here: deciding what the
+ *                catalogue contains is a decision, so it sits above.
  *   Oversight    who did what, borrowing an identity, and who may do anything
  *                at all.
  *
@@ -64,8 +71,13 @@ type Section = {
   key: string
   /** The rail's glyph. See icons.tsx on why these carry their labels anyway. */
   Icon: (p: { className?: string }) => React.ReactElement
-  /** Hidden unless the caller is the platform super admin. */
-  superAdminOnly?: boolean
+  /* Who sees it. Undefined means everybody with platform scope.
+   *
+   * A list rather than the boolean this used to be, because two of the entries
+   * below belong to neither "the super admin" nor "everybody": Table 3.1 makes
+   * audit review and data requests the compliance officer's responsibility, and
+   * a boolean can only get one of those two wrong. */
+  roles?: Role[]
 }
 
 type Group = {
@@ -78,15 +90,34 @@ const GROUPS: Group[] = [
   {
     label: 'Overview',
     sections: [
+      /* No roles: everybody lands here. What it renders differs — the super
+         admin gets the platform's figures, everybody else gets the queue of
+         what is waiting on them. See Dashboard.tsx. */
       { to: '/dashboard', label: 'Dashboard', key: 'd', Icon: IconDashboard },
-      { to: '/ecosystem', label: 'Ecosystem', key: 'e', Icon: IconEcosystem },
+      // The aggregate meant to leave the building, so it belongs to whoever
+      // answers for the platform.
+      { to: '/ecosystem', label: 'Ecosystem', key: 'e', Icon: IconEcosystem, roles: ['SUPER_ADMIN'] },
     ],
   },
   {
     label: 'Decisions',
     sections: [
+      /* First, and it is both the catalogue and the review queue now.
+       *
+       * It was two screens — a catalogue under Published, and a review queue
+       * here — which meant approving a scheme and then looking at it were
+       * different places. Reviewing IS deciding what the catalogue contains, so
+       * they are one screen, and it sits here because the deciding is what has
+       * somebody waiting on it. */
+      { to: '/scholarships', label: 'Scholarships', key: 'c', Icon: IconScholarships },
+      /* Second. A document here blocks one student; an unreviewed scheme blocks
+         every student who would match it, which is why it sits below.
+         Called Students rather than Verifications because that is what it now
+         is: the queue is its default tab, and the other two are the only place
+         a student's claims and their evidence appear side by side — which is
+         where you go once the queue no longer holds them. */
+      { to: '/verifications', label: 'Students', key: 'f', Icon: IconVerifications },
       { to: '/organisations', label: 'Organisations', key: 'o', Icon: IconOrganisations },
-      { to: '/data-requests', label: 'Data requests', key: 'r', Icon: IconDataRequests },
       { to: '/grievances', label: 'Grievances', key: 'g', Icon: IconGrievances },
     ],
   },
@@ -100,36 +131,33 @@ const GROUPS: Group[] = [
   {
     label: 'Oversight',
     sections: [
-      { to: '/audit', label: 'Audit trail', key: 'a', Icon: IconAudit },
-      { to: '/support', label: 'Support access', key: 's', Icon: IconSupport },
-      // Only the super admin administers accounts, so only they are offered the
-      // link. Showing it to platform staff would be offering a door that answers
-      // 403 — the route and the service refuse it either way.
-      { to: '/users', label: 'User management', key: 'u', Icon: IconUsers, superAdminOnly: true },
+      /* Compliance as well as the super admin: Table 3.1 assigns audit review
+         to the compliance officer, and a compliance function that cannot read
+         the log is not enforcing anything. */
+      { to: '/audit', label: 'Audit trail', key: 'a', Icon: IconAudit,
+        roles: ['SUPER_ADMIN', 'COMPLIANCE'] },
+      // Signing in as somebody else. The narrowest door in the panel.
+      { to: '/support', label: 'Support access', key: 's', Icon: IconSupport,
+        roles: ['SUPER_ADMIN'] },
+      /* Three roles, three different screens behind one link. The super admin
+         administers platform accounts; an administrator manages tenant members
+         and students; a staff member reads the same two lists. Nobody else has
+         any business here — a compliance officer looks an account up through
+         Support access, which is audited as a support action. */
+      { to: '/users', label: 'User management', key: 'u', Icon: IconUsers,
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STAFF'] },
     ],
   },
 ]
 
 interface Props {
-  pendingOrganisations?: number
-  openDataRequests?: number
-  /* Overdue only, not every open grievance. A badge that always reads 40-odd is
-   * a badge nobody looks at; this is the number the screen is sorted by. */
-  overdueGrievances?: number
+  /* Keyed by queue rather than one prop per queue. Three positional props and a
+   * route→prop ternary was how this worked, and adding the fourth queue is what
+   * showed the shape up: see lib/queues.ts. */
+  counts?: QueueCounts
 }
 
-/** Read out after the count, so the announcement is a sentence. */
-function countHint(to: string) {
-  switch (to) {
-    case '/organisations': return 'awaiting approval'
-    case '/data-requests': return 'waiting on a decision'
-    default: return 'past due'
-  }
-}
-
-export default function Layout({
-  pendingOrganisations, openDataRequests, overdueGrievances,
-}: Props) {
+export default function Layout({ counts = {} }: Props) {
   const { context, impersonation, endImpersonation } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
@@ -155,16 +183,23 @@ export default function Layout({
    * Memoised because the document-title effect below depends on the flat list:
    * a fresh array every render would re-run that effect every render, and it
    * also moves focus to <main>. */
+  /* Read out once, so the memo below depends on the role rather than on the
+     whole context object — the filter reads it twice and the two readings must
+     not be able to disagree. */
+  const role = context?.role
+
   const groups = useMemo(
     () => GROUPS
       .map(g => ({
         ...g,
-        sections: g.sections.filter(
-          s => !s.superAdminOnly || context?.role === 'SUPER_ADMIN',
-        ),
+        /* No list means everybody with platform scope. A list means those
+           roles and nobody else — and a group whose every section is filtered
+           out disappears with them, below, rather than leaving a heading over
+           nothing. */
+        sections: g.sections.filter(s => !s.roles || (!!role && s.roles.includes(role))),
       }))
       .filter(g => g.sections.length > 0),
-    [context?.role],
+    [role],
   )
 
   const sections = useMemo(() => groups.flatMap(g => g.sections), [groups])
@@ -240,10 +275,8 @@ export default function Layout({
                 <div className="nav-group-label" aria-hidden="true">{group.label}</div>
 
                 {group.sections.map(s => {
-                  const count = s.to === '/organisations' ? pendingOrganisations
-                    : s.to === '/data-requests' ? openDataRequests
-                      : s.to === '/grievances' ? overdueGrievances
-                        : 0
+                  const queue = queueFor(s.to)
+                  const count = queue ? counts[queue.key] ?? 0 : 0
                   return (
                     /* title, so a pointer resting on a collapsed glyph gets the
                        label from the platform even before the rail widens. */
@@ -253,7 +286,7 @@ export default function Layout({
                       {!!count && (
                         <span className="count">
                           <span className="count-n">{count}</span>
-                          <span className="sr-only">{` ${countHint(s.to)}`}</span>
+                          <span className="sr-only">{` ${queue?.hint ?? ""}`}</span>
                         </span>
                       )}
                     </NavLink>
@@ -272,11 +305,7 @@ export default function Layout({
             <div className="topbar-where">
               {sections.find(s => s.to === location.pathname)?.label ?? 'Admin panel'}
             </div>
-            <NotificationBell
-              pendingOrganisations={pendingOrganisations}
-              openDataRequests={openDataRequests}
-              overdueGrievances={overdueGrievances}
-            />
+            <NotificationBell counts={counts} />
             <AccountMenu onShortcuts={() => setHelpOpen(true)} />
           </header>
 
@@ -284,7 +313,12 @@ export default function Layout({
               focus here, which is what makes both do anything for a
               screen-reader user rather than only scrolling the page. */}
           <main className="main" id="main" tabIndex={-1} ref={mainRef}>
-            <Outlet />
+            {/* Inside <main>, so a screen that fails to render loses the page
+                and keeps the shell: the nav is still there to leave by. Keyed
+                on the path so moving to another screen clears the error. */}
+            <ErrorBoundary resetKey={location.pathname}>
+              <Outlet />
+            </ErrorBoundary>
           </main>
         </div>
       </div>

@@ -40,7 +40,7 @@ export function Field({ label, hint, error, required, children }: FieldProps) {
     <div className="field">
       <label htmlFor={id}>
         {label}
-        {required && <span aria-hidden="true"> *</span>}
+        {required && <span className="req" aria-hidden="true"> *</span>}
         {required && <span className="sr-only"> (required)</span>}
       </label>
 
@@ -71,9 +71,13 @@ interface DialogProps {
   onClose: () => void
   children: ReactNode
   footer?: ReactNode
+  /* Wider, for a form long enough that the default column turns it into a
+     scroll. Not the default: a dialog asking one question reads better narrow,
+     and a confirmation stretched to 52rem looks like a mistake. */
+  wide?: boolean
 }
 
-export function Dialog({ open, title, onClose, children, footer }: DialogProps) {
+export function Dialog({ open, title, onClose, children, footer, wide }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null)
   const titleId = useId()
 
@@ -97,7 +101,7 @@ export function Dialog({ open, title, onClose, children, footer }: DialogProps) 
   }, [onClose])
 
   return (
-    <dialog ref={ref} aria-labelledby={titleId}>
+    <dialog ref={ref} aria-labelledby={titleId} className={wide ? 'wide' : undefined}>
       <div className="head">
         <h2 id={titleId}>{title}</h2>
       </div>
@@ -112,7 +116,7 @@ export function Dialog({ open, title, onClose, children, footer }: DialogProps) 
  * Colour never carries meaning alone: the label is always present, so the
  * distinction survives monochrome rendering and colour vision deficiency. */
 
-type Tone = 'neutral' | 'ok' | 'warn' | 'danger' | 'accent'
+export type Tone = 'neutral' | 'ok' | 'warn' | 'danger' | 'accent'
 
 export function Pill({ tone = 'neutral', children }: { tone?: Tone; children: ReactNode }) {
   return <span className={`pill ${tone}`}>{children}</span>
