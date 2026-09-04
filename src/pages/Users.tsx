@@ -153,7 +153,7 @@ export default function Users() {
 
   async function act(
     u: PlatformUser,
-    what: 'suspend' | 'reinstate' | 'remove' | 'reset',
+    what: 'suspend' | 'reinstate' | 'remove' | 'signout',
   ) {
     const who = u.email ?? u.phone ?? 'that account'
     const wasDeactivated = u.status === 'DEACTIVATED'
@@ -162,11 +162,22 @@ export default function Users() {
       if (what === 'remove') {
         await api.del(`/admin/accounts/${u.user_id}`)
         announce(`${who} is deactivated. Every role and session is gone.`, 'warn')
-      } else if (what === 'reset') {
-        await api.post(`/admin/accounts/${u.user_id}/reset-password`)
+      } else if (what === 'signout') {
+        /* Sessions only, and never the password.
+         *
+         * This button used to call reset-password, which replaces the
+         * credential and mails the new one — and on this deployment that mail
+         * cannot be sent, because MSG91 carries only the one-time-code
+         * template. So every press destroyed an account: the password changed
+         * and nobody was ever told the new one. It took the super admin twice
+         * on 2026-09-04 before the pattern was visible.
+         *
+         * Ending sessions is what the button was wanted for anyway, and it has
+         * nothing to deliver, so it cannot half-succeed. */
+        await api.post(`/admin/accounts/${u.user_id}/revoke-sessions`)
         announce(
-          `A temporary password has been emailed to ${who}. It lasts 24 hours, `
-          + 'and every other session is signed out.',
+          `${who} is signed out of every session. Their password is unchanged, `
+          + 'so they can sign straight back in.',
           'ok',
         )
       } else {
@@ -364,18 +375,26 @@ export default function Users() {
                           * whatever this renders. */}
                         {canManage && (
                           <>
-                            {/* Somebody who has lost their password. The new one
-                              * goes to the address on the account and never to
-                              * this screen — an administrator resetting a tenant
-                              * member's password has no business reading it.
+                            {/* A shared or forgotten laptop, a device somebody no
+                              * longer has, a session that should not still be
+                              * open. Every session goes and the credential stays,
+                              * so the account's owner is inconvenienced by one
+                              * sign-in rather than locked out.
                               *
-                              * Absent for a deactivated account: handing a
-                              * credential to one would be a quiet way to
-                              * reanimate it, and the service refuses it. */}
+                              * Deliberately not "email a password". That is a
+                              * larger act — it takes the account away from
+                              * whoever holds it and depends on a mail arriving —
+                              * and it is the wrong tool for every case above.
+                              *
+                              * Absent for a deactivated account, which has no
+                              * sessions to end. */}
                             {!dead && (
-                              <button className="sm" onClick={() => act(u, 'reset')}>
-                                Email a password
-                                <span className="sr-only"> to {u.email ?? u.phone}</span>
+                              <button className="sm" onClick={() => act(u, 'signout')}>
+                                Sign out everywhere
+                                <span className="sr-only">
+                                  {' '}— ends every session for {u.email ?? u.phone},
+                                  leaving their password unchanged
+                                </span>
                               </button>
                             )}
 

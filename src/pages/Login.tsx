@@ -152,7 +152,7 @@ export default function Login() {
           </p>
 
           <h1>Admin panel</h1>
-          <p className="lede">Indic AI Scholarship Portal</p>
+          <p className="lede">Indic AI Foundation For Social Good</p>
 
           {error && <div className="alert danger" role="alert">{error}</div>}
 
