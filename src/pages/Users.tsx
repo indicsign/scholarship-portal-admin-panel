@@ -82,7 +82,15 @@ const TABS: { id: Tab; label: string; hint: string }[] = [
 ]
 
 export default function Users() {
-  const { context } = useAuth()
+  /* account as well as context, and only to recognise your own row.
+   *
+   * A Context is a role and never names the account holding it, which is fine
+   * everywhere else on this screen and not here: the service refuses to
+   * deactivate the caller's own account (DeactivateUser) and to revoke the
+   * caller's own super admin role (RevokePlatformRole), so those two buttons
+   * were doors that answer 409. Several people share a role and impersonation
+   * borrows one, so the role alone cannot tell us whose row this is. */
+  const { context, account } = useAuth()
   const announce = useAnnounce()
   const [tab, setTab] = useState<Tab>('platform')
   const [q, setQ] = useState('')
@@ -244,6 +252,18 @@ export default function Users() {
               <tbody>
                 {query.data.map(u => {
                   const dead = u.status === 'DEACTIVATED'
+                  /* Your own row. Suspend and Remove are absent on it, for the
+                     reason the staff case gives above: the service refuses both
+                     — "You cannot deactivate your own account." — and a button
+                     that reports that back is a button that should not have
+                     been there. Everything else stays: granting yourself a
+                     second role is allowed, and so is being handed a password.
+
+                     This is the panel half of the rule. The service is the
+                     half that matters, and it also refuses to revoke the last
+                     super admin from anybody, which is the case this cannot
+                     see from one row. */
+                  const isSelf = !!account && u.user_id === account.user_id
                   const roles = u.roles.filter(r =>
                     activeTab === 'platform' ? !r.organisation_id
                       : activeTab === 'organisation' ? r.organisation_id
@@ -352,15 +372,16 @@ export default function Users() {
                                 {dead ? 'Bring back' : 'Reinstate'}
                                 <span className="sr-only"> {u.email ?? u.phone}</span>
                               </button>
-                            ) : (
+                            ) : !isSelf && (
                               <button className="sm" onClick={() => act(u, 'suspend')}>
                                 Suspend<span className="sr-only"> {u.email ?? u.phone}</span>
                               </button>
                             )}
 
                             {/* Nothing to remove from an account already
-                              * deactivated; the service refuses a second one. */}
-                            {!dead && (
+                              * deactivated; the service refuses a second one.
+                              * Nor from your own, which it also refuses. */}
+                            {!dead && !isSelf && (
                               <button className="sm danger" onClick={() => act(u, 'remove')}>
                                 Remove<span className="sr-only"> {u.email ?? u.phone}</span>
                               </button>
@@ -609,11 +630,17 @@ function RolesDialog({
   onChanged: (message: string) => void
   onDone: () => void
 }) {
+  const { account } = useAuth()
   const [role, setRole] = useState<Role>('STAFF')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const who = user.email ?? user.phone ?? 'this account'
+  /* Revoking your own super admin is refused by the service, so it is not
+   * offered. Granting is untouched — adding a second super admin is exactly how
+   * you are meant to hand the role on before giving up your own, and the
+   * service refuses to leave the platform without one either way. */
+  const isSelf = !!account && user.user_id === account.user_id
   const platform = user.roles.filter(r => !r.organisation_id)
   const organisational = user.roles.filter(r => r.organisation_id)
   const held = new Set(platform.map(r => r.role))
@@ -650,16 +677,24 @@ function RolesDialog({
           {platform.map(r => (
             <li key={r.role} className="row-between">
               <span>{roleLabel(r.role)}</span>
-              <button
-                className="sm danger"
-                disabled={busy}
-                onClick={() => run(
-                  () => api.del(`/admin/accounts/${user.user_id}/platform-roles/${r.role}`),
-                  `${roleLabel(r.role)} taken away from ${who}.`,
-                )}
-              >
-                Revoke<span className="sr-only"> {roleLabel(r.role)}</span>
-              </button>
+              {isSelf && r.role === 'SUPER_ADMIN' ? (
+                /* Said rather than left blank. An empty space where every other
+                   row has a button reads as a rendering fault, and the reason
+                   is the useful part: grant it to somebody else and they can
+                   take yours. */
+                <span className="faint">Yours — grant it to somebody else first</span>
+              ) : (
+                <button
+                  className="sm danger"
+                  disabled={busy}
+                  onClick={() => run(
+                    () => api.del(`/admin/accounts/${user.user_id}/platform-roles/${r.role}`),
+                    `${roleLabel(r.role)} taken away from ${who}.`,
+                  )}
+                >
+                  Revoke<span className="sr-only"> {roleLabel(r.role)}</span>
+                </button>
+              )}
             </li>
           ))}
         </ul>

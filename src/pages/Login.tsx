@@ -271,7 +271,16 @@ export default function Login() {
                             className={
                               'box' +
                               (code[i] ? ' filled' : '') +
-                              (i === code.length ? ' next' : '')
+                              // Clamped to the last box, not `i === code.length`.
+                              //
+                              // .next is the focus indicator for the whole
+                              // control now that the group no longer draws a
+                              // ring around all six boxes, and an unclamped
+                              // index matches nothing once six digits are in —
+                              // so the moment the code was complete, focus
+                              // became invisible. Clamping keeps exactly one
+                              // active box at every length.
+                              (i === Math.min(code.length, CODE_LENGTH - 1) ? ' next' : '')
                             }
                           >
                             {code[i] ?? ''}

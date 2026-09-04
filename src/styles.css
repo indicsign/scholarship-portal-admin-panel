@@ -18,7 +18,16 @@
 
   /* Neutrals. Contrast against --surface is stated for each, because the 4.5:1
    * floor for body text is a requirement rather than a preference. */
-  --bg: #f6f7f9;
+
+  /* The page behind the cards, deepened from #f6f7f9.
+   *
+   * At that value the ground was 1.5% off white and the white cards sitting on
+   * it had nothing but a 1px border to say they were cards, so a screen with
+   * four stats and a table read as text floating on an empty sheet. The
+   * structure was being carried entirely by borders. Separating the ground
+   * from the surface lets the cards do it instead, which is also what stops a
+   * saturated button being the only thing on the page with any weight. */
+  --bg: #eaedf1;
   --surface: #ffffff;
   --surface-sunken: #f0f2f5;
 
@@ -31,8 +40,21 @@
   --doc-ground-text: #d6d9de;
   --doc-ground-link: #9fc0ff;
   --border: #d5d9e0;
-  /* 3.09:1 against --surface — the 1.4.11 floor for a control boundary. */
-  --border-strong: #8e8c95;
+  /* The boundary of every control: inputs, selects, default buttons.
+   *
+   * Lightened from #8e8c95, and this is as far as it goes. 1.4.11 wants 3:1
+   * for the visual information that identifies a control, and inside a white
+   * card the border is the only thing identifying one — the field's fill is
+   * the same white as the card behind it, so there is no second affordance to
+   * fall back on. #8e8c95 measured 3.31:1 (its comment claimed 3.09, which was
+   * wrong and made the margin look smaller than it was); this is 3.11:1, so
+   * the remaining headroom is about a tenth of a ratio point.
+   *
+   * A resting field therefore stays a visible grey box on purpose. What makes
+   * it read as calmer is not this token, which cannot move much, but the
+   * ground behind the card and the fact that blue now means focus and nothing
+   * else. */
+  --border-strong: #90929a;
 
   --text: #16191f;          /* 16.1:1 */
   --text-muted: #5a6472;    /*  6.0:1 */
@@ -40,9 +62,38 @@
    * previous value was 4.47:1 and failed the 4.5 floor by a hair. */
   --text-faint: #74727a;    /*  4.74:1 */
 
+  /* --- the colour hierarchy -------------------------------------------------
+   *
+   * Three tiers, and the point of them is that they are three, not one:
+   *
+   *   --action   a thing you do        solid, neutral, near-black
+   *   --accent   where you are, or     blue: focus rings, the current tab,
+   *              what has focus        the current nav item, selection
+   *   greys      everything else
+   *
+   * Before this there was one tier. --accent filled the primary button, drew
+   * the focus ring, coloured the active tab and marked the current nav item,
+   * so "press this", "you are here" and "you have focus" were the same blue at
+   * the same strength, and the only saturated thing on a near-white page was
+   * whichever button happened to be on screen. On Scholarships that made "Add
+   * a listing" the loudest element of a page whose actual subject is a
+   * catalogue of 128 schemes.
+   *
+   * The primary action is now neutral and dark rather than blue. It stays
+   * unmistakably the primary action — it is the only solid fill in the
+   * interface — but it carries weight through value instead of saturation,
+   * which is what was doing the shouting. That also frees blue to mean exactly
+   * one thing, which is what makes a focused field legible as focused.
+   *
+   * If the brand needs the button blue after all, this is one token: set
+   * --action to --accent's value and the rest of the hierarchy still holds. */
   --accent: #1c4fd8;        /*  6.9:1 */
   --accent-weak: #e8eeff;
   --accent-text: #ffffff;
+
+  --action: #1f2733;        /* 15.0:1 against --action-text */
+  --action-text: #ffffff;
+  --action-hover: #2f3b4d;
 
   --ok: #12683f;            /*  5.4:1 */
   --ok-weak: #e2f3ea;
@@ -102,6 +153,15 @@
     --accent-weak: #1e2a47;
     --accent-text: #0d1117;
 
+    /* Inverted, for the same reason it is near-black in light: the primary
+     * action is the one solid fill in the interface, and on a dark ground the
+     * way to be solid is to be light. A saturated blue button here had the
+     * same problem it had in light — it was the only chromatic thing on the
+     * screen. */
+    --action: #e9ecf1;      /* 15.1:1 against --action-text */
+    --action-text: #14161a;
+    --action-hover: #ffffff;
+
     --ok: #5fd39a;
     --ok-weak: #16301f;
     --warn: #e0b055;
@@ -126,6 +186,10 @@
   --accent: #7ea2ff;
   --accent-weak: #1e2a47;
   --accent-text: #0d1117;
+
+  --action: #e9ecf1;        /* 15.1:1 against --action-text */
+  --action-text: #14161a;
+  --action-hover: #ffffff;
 
   --ok: #5fd39a;
   --ok-weak: #16301f;
@@ -1217,6 +1281,15 @@ button, .btn {
   /* 24x24 is the WCAG 2.2 AA target-size minimum (2.5.8); the padding above
    * clears it for every button in the panel. */
   min-height: 30px;
+  /* So becoming available is something you can see happen.
+   *
+   * "Send another in 24s" and "Verify and sign in" both cross from disabled to
+   * available while the operator is watching them — the timer running out, the
+   * sixth digit landing — and swapping three colours in one frame reads as a
+   * glitch rather than as the button waking up. The reduced-motion rule at the
+   * top of the file cuts this to 0.01ms, so it costs nothing to anyone who has
+   * asked for less movement. */
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 button:hover:not(:disabled) { background: var(--surface-sunken); }
 /* Opacity alone, on a variant with its own background, cannot be checked:
@@ -1227,8 +1300,15 @@ button:hover:not(:disabled) { background: var(--surface-sunken); }
  * decides between them. */
 button:disabled { cursor: not-allowed; }
 
-button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
-button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+button.primary { background: var(--action); border-color: var(--action); color: var(--action-text); }
+/* A stated hover colour rather than filter: brightness(1.08). On a near-black
+ * fill 8% is invisible, and in dark theme the fill is already near-white so
+ * brightening it has nowhere to go — the old rule read as "no hover" in both
+ * themes once the fill stopped being a mid-tone blue. */
+button.primary:hover:not(:disabled) {
+  background: var(--action-hover);
+  border-color: var(--action-hover);
+}
 button.danger { color: var(--danger); border-color: currentColor; }
 button.subtle { border-color: transparent; background: transparent; color: var(--text-muted); }
 button.subtle:hover:not(:disabled) { background: var(--surface-sunken); color: var(--text); }
@@ -1277,6 +1357,20 @@ input, select, textarea {
   width: 100%;
 }
 textarea { resize: vertical; min-height: 4.5rem; }
+
+/* The field you are in turns blue; a resting field never does.
+ *
+ * The ring alone was carrying this, and a ring sits outside the control at
+ * outline-offset 2px — so at a glance a row of five filter fields all looked
+ * alike and none looked current. Colouring the border as well means the
+ * focused field differs from its neighbours in the same place the eye is
+ * already looking, and it is the only time an input is ever blue.
+ *
+ * Not a substitute for the ring, which stays: border colour alone would be
+ * colour carrying the state on its own. */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible { border-color: var(--accent); }
 
 /* align-content: start is load-bearing, not tidying.
  *
@@ -1472,10 +1566,11 @@ dialog .foot {
   display: block;
   max-width: 19rem;
   border-radius: var(--radius);
-  /* Room for the focus ring. It is drawn on the group at outline-offset 4px,
-     and without this the hint underneath sits inside it — which reads as the
-     ring having swallowed the sentence. */
-  margin-block-end: 0.5rem;
+  /* 0.5rem when the group carried a ring at outline-offset 4px and the hint
+     underneath would otherwise have sat inside it. The ring is on the active
+     box now, so this only needs to be the .field gap — which is what closes
+     the space between the boxes and "Six digits, from the email…". */
+  margin-block-end: 0.25rem;
 }
 /* flex-wrap with a floor under each box: at 200% text six boxes no longer fit
  * the card, and given a minimum they break to two rows of three rather than
@@ -1492,18 +1587,40 @@ dialog .foot {
   font-size: 20px; font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-/* Progress said twice — the digit is in the box, and the box has changed — so
- * colour is not carrying it alone. */
-.code-boxes .box.filled { border-color: var(--accent); }
+/* A filled box is deliberately NOT blue.
+ *
+ * It used to be — a second signal beside the digit, on the reasoning that
+ * colour should not carry progress alone. The reasoning was right and the
+ * conclusion was wrong: with a blue border on every filled box, another on the
+ * next one, and a 3px blue ring around the whole group, the code field was
+ * three blues deep and read as an error state rather than as a form. The digit
+ * is the signal, and a digit is text — so nothing here depends on colour at
+ * all, which is a stronger position than the one the blue was defending.
+ *
+ * Blue now means one thing in this group: the box you are typing into. */
 
-/* Where the next digit will go, and only while the field has focus: a caret
- * blinking in a form nobody is typing in is a form that looks focused and is
- * not. */
+/* The box you are typing into, and the only blue in the group.
+ *
+ * This also carries the focus indicator for the whole control, which is why
+ * there is no longer a ring around .code-boxes. There is one input behind the
+ * six boxes, and .next is where its caret is, so marking that box marks focus
+ * — a 3px blue edge on one box out of six is unmissable without surrounding
+ * the group in blue to say it.
+ *
+ * That only holds if .next always exists. Login.tsx clamps it to the last box
+ * for exactly this reason: on the old `i === code.length` a complete code
+ * matched no box, and with the group ring gone focus would have become
+ * invisible on the sixth digit.
+ *
+ * All of it sits behind :has(input:focus), because a caret blinking in a form
+ * nobody is typing in is a form that looks focused and is not. */
 .code-boxes:has(input:focus) .box.next {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
-.code-boxes:has(input:focus) .box.next::after {
+/* No caret drawn over a digit. When the code is complete .next is the sixth
+ * box, which is filled, and a bar through the 6 reads as a strikethrough. */
+.code-boxes:has(input:focus) .box.next:not(.filled)::after {
   content: '';
   width: 2px; height: 1.5rem;
   background: var(--accent);
@@ -1535,35 +1652,70 @@ dialog .foot {
 /* Invisible text still highlights, and a select-all would otherwise drag a blue
  * block across the boxes. */
 .code-boxes input::selection { background: transparent; }
+/* The input's own ring is suppressed and NOT replaced by one on the group.
+ * .box.next above is the focus indicator; a 3px ring at outline-offset 4px
+ * around all six boxes was the single heaviest piece of blue on the sign-in
+ * card, and it was drawing a box around a box around a box. */
 .code-boxes input:focus-visible { outline: none; }
-.code-boxes:has(input:focus-visible) { outline: 3px solid var(--accent); outline-offset: 4px; }
 .code-boxes:has(input[aria-invalid="true"]) .box { border-color: var(--danger); }
 
 /* Confirmation of a resend, and the two ways out of a code that never came. */
 /* Reserved height, so the row below does not jump when a resend is confirmed. */
+/* Tightened, because the lower half of the card was mostly air.
+ *
+ * The reserved line stays — .auth-sent is empty until a resend is confirmed,
+ * and letting it appear from nothing would shift the two rows under it — but
+ * it no longer also carries a top margin, and one line is enough to hold the
+ * sentence it will get. Between them those two changes and the .field rule
+ * below close roughly 14px of dead space between the hint and "No email yet?"
+ * without removing anything. */
 .login .auth-sent {
-  margin: 0.25rem 0 0; font-size: 12px; color: var(--text-muted);
-  min-height: 1.1rem;
+  margin: 0; font-size: 12px; color: var(--text-muted);
+  min-height: 1rem;
 }
 .login .auth-retry {
   display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
-  margin-top: 0.25rem; font-size: 12px;
+  margin-top: 0.125rem; font-size: 12px;
 }
+
+/* The card's own rhythm, tighter than the panel's forms.
+ *
+ * 0.75rem between fields is right on a dialog with fifteen of them; on a card
+ * with one field and three things under it, it spreads four related controls
+ * over more height than they need and the flow stops reading as one sequence. */
+.login .field { margin-bottom: 0.5rem; }
+
+/* The one exception to the tightening: the primary action keeps its distance.
+ *
+ * Everything above it is about obtaining or re-obtaining the code; this is the
+ * step that leaves. Sitting flush under "Use a different account" it read as a
+ * third item in the same list. */
+.login button[type="submit"] { margin-top: 0.75rem; }
 
 /* A quiet action that has to line up with the card's left edge rather than with
    the row of buttons above it: no horizontal padding, so its text starts where
    every other line of text in the card starts. The vertical padding keeps the
-   target at 40px, matching .sm elsewhere in the panel. */
+   target above the 24px 2.5.8 floor at ~31px. */
 .login .link-quiet {
   display: inline-block;
-  margin-top: 0.125rem;
-  padding: 0.625rem 0;
+  margin-top: 0;
+  padding: 0.5rem 0;
   background: none; border: 0;
-  color: var(--text-muted); font-size: 12px; font-weight: 600;
-  text-decoration: underline; text-underline-offset: 2px;
+  color: var(--text-muted); font-size: 12px; font-weight: 500;
   cursor: pointer;
 }
-.login .link-quiet:hover { color: var(--text); }
+/* Underlined on hover and focus rather than always.
+ *
+ * A permanent underline at 600 weight made this read as a secondary button
+ * competing with "Send another", when it is the quieter of the two ways out —
+ * it throws away a password that was just accepted. It is a standalone control
+ * on its own line, not a link inside a paragraph, so 1.4.1 is not what the
+ * underline was there for; on hover and focus it still says "link". */
+.login .link-quiet:hover,
+.login .link-quiet:focus-visible {
+  color: var(--text);
+  text-decoration: underline; text-underline-offset: 2px;
+}
 .login .link-quiet:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
 
 /* --- misc ------------------------------------------------------------------------------------- */
