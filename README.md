@@ -1,4 +1,4 @@
-# Admin panel
+# Admin Panel
 
 The platform operator's console. React + TypeScript + Vite, talking to the Go
 API in `../backend`.

@@ -233,8 +233,8 @@ export default function Layout({ counts = {} }: Props) {
 
     const section = sections.find(s => s.to === location.pathname)
     document.title = section
-      ? `${section.label} · Admin panel`
-      : 'Admin panel · Scholarship Platform'
+      ? `${section.label} · Admin Panel`
+      : 'Admin Panel · Scholarship Platform'
 
     if (firstRender.current) {
       firstRender.current = false
@@ -255,10 +255,17 @@ export default function Layout({ counts = {} }: Props) {
             to this landmark. */}
         <nav className="sidebar" aria-label="Sections">
           <div className="brand">
-            <span className="brand-mark" aria-hidden="true">SP</span>
+            {/* "SP" stood in here until the artwork was available. The tile
+                stays: it is the one thing that survives the rail collapsing to
+                3.5rem, and without it the rail would begin abruptly at the
+                first glyph of the name. aria-hidden because the words beside
+                it already say what it is. */}
+            <span className="brand-mark" aria-hidden="true">
+              <img src="/logo-mark.png" alt="" width="22" height="16" />
+            </span>
             <span className="brand-text">
               Scholarship Platform
-              <small>Admin panel</small>
+              <small>Admin Panel</small>
             </span>
           </div>
 
@@ -303,7 +310,7 @@ export default function Layout({ counts = {} }: Props) {
               rather than having to be laid out around. */}
           <header className="topbar">
             <div className="topbar-where">
-              {sections.find(s => s.to === location.pathname)?.label ?? 'Admin panel'}
+              {sections.find(s => s.to === location.pathname)?.label ?? 'Admin Panel'}
             </div>
             <NotificationBell counts={counts} />
             <AccountMenu onShortcuts={() => setHelpOpen(true)} />

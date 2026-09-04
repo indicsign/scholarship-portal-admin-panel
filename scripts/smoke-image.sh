@@ -214,7 +214,7 @@ done
 # is the whole difference between the two, and a blanket redirect that swallowed
 # the favicon would ship as a working panel with a broken browser tab — the kind
 # of thing nobody files a bug about and everybody notices.
-for f in /favicon.svg /icons.svg; do
+for f in /favicon.ico /icons.svg; do
     code=$(status "$f")
     if [ "$code" = "200" ]; then
         pass "$f is served, not redirected"

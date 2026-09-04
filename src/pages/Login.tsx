@@ -137,6 +137,27 @@ export default function Login() {
     <main className="login" id="main">
       <div className="card">
         <div className="body">
+          {/* The foundation's mark, above the panel it opens.
+              
+              alt is empty and the name is real text below: the artwork's own
+              wordmark reads "Indic-ai", the line under it reads "Indic AI
+              Foundation For Social Good", and giving the image alt text would
+              have a screen reader announce the organisation twice under two
+              slightly different names.
+              
+              The mark is the tree over the wordmark, not the full artwork —
+              scripts/build-icons.py drops the "Foundation for social good"
+              strapline baked into the source because at #d3d3d3 it is about
+              1.6:1 on this card. It is the lede below instead, which is
+              legible, selectable, and grows with the reader's font size. */}
+          <img
+            src="/logo-full.png"
+            alt=""
+            width="150"
+            height="104"
+            className="brand-logo"
+          />
+
           {/* How far in, and how far to go.
               
               The second factor is not optional for any role that can reach this
@@ -151,7 +172,7 @@ export default function Login() {
             Step {awaitingCode ? 2 : 1} of 2 · {awaitingCode ? 'Your code' : 'Your password'}
           </p>
 
-          <h1>Admin panel</h1>
+          <h1>Admin Panel</h1>
           <p className="lede">Indic AI Foundation For Social Good</p>
 
           {error && <div className="alert danger" role="alert">{error}</div>}

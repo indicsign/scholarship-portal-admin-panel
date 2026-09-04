@@ -443,6 +443,13 @@ body {
   background: var(--accent-weak); color: var(--accent);
   font: 700 12px/1 var(--mono);
 }
+/* The tree sits inside the tile rather than replacing it.
+ *
+ * It is a glow, and a glow needs a ground: on the light theme's white rail the
+ * pale outer falloff all but vanishes, and the tile — a tint of the same accent
+ * the mark is drawn in — gives it one in both themes without boxing it in.
+ * 1.4rem inside a 1.85rem tile leaves the canopy clear of the corner radius. */
+.brand-mark img { display: block; width: 1.4rem; height: auto; }
 .brand-text small { display: block; font-weight: 400; color: var(--text-muted); font-size: 12px; }
 
 /* The rail is the height of the screen now, not of the page, so a nav longer
@@ -1517,6 +1524,21 @@ dialog .foot {
 .login { display: grid; place-items: center; min-height: 100%; padding: 2rem 1rem; }
 .login .card { width: min(24rem, 100%); }
 .login .body { padding: 1.25rem; }
+
+/* The foundation's mark, above everything else on the card.
+ *
+ * width/height are on the element as well so the card does not reflow when the
+ * image lands — the heading and the ticks would otherwise jump 104px down while
+ * somebody is already reading them.
+ *
+ * `max-width: 100%` rather than a fixed 150px: at 200% zoom on a 320px screen
+ * the card is narrower than the mark, and a lockup that forces a horizontal
+ * scrollbar on the sign-in page fails the reflow the rest of the panel passes. */
+.login .brand-logo {
+  display: block;
+  width: 150px; max-width: 100%; height: auto;
+  margin: 0 0 1rem;
+}
 /* The card's own identity, weighted up.
  *
  * 17px at the default weight was the same size as a table header elsewhere in

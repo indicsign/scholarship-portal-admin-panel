@@ -43,6 +43,20 @@ server {
     ${LISTEN_IPV6}
     server_name _;
 
+    # Every redirect this server sends has to be relative, because nginx builds
+    # absolute ones out of $host and the port it is listening on — and that port
+    # is whatever the platform assigned (5175 in production), behind TLS that
+    # nginx never sees. The @to_root redirect below went out as
+    # `http://sp-admin.indic-ai.org:5175/`: the wrong scheme, and a port only
+    # reachable inside the container, so every deep link and every reload
+    # dead-ended at a connection that could not be made.
+    #
+    # port_in_redirect off is the narrower fix and not enough — it drops the
+    # port and still sends http:// to a browser that arrived over https.
+    # Relative means the browser reuses the scheme, host and port it already
+    # has, which are the edge's and correct by construction.
+    absolute_redirect off;
+
     root  /usr/share/nginx/html;
     index index.html;
 
@@ -84,7 +98,7 @@ server {
     }
 
     location / {
-        # Root-level static files — favicon.svg, icons.svg — are real and must
+        # Root-level static files — favicon.ico, icons.svg — are real and must
         # still be served. Only paths with no file behind them are redirected.
         try_files $uri @to_root;
     }
