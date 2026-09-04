@@ -4,8 +4,8 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth-context'
 import { rememberPlace } from '../lib/place'
 import { ErrorBoundary } from './ErrorBoundary'
+import type { Level, Section as SectionKey } from '../lib/permissions'
 import { roleLabel } from '../lib/roles'
-import type { Role } from '../lib/types'
 import AccountMenu from './AccountMenu'
 import NotificationBell from './NotificationBell'
 import { queueFor, type QueueCounts } from '../lib/queues'
@@ -15,6 +15,7 @@ import {
   IconMessages, IconOrganisations, IconScholarships, IconSlides, IconSupport,
   IconVerifications,
   IconUsers,
+  IconRoles,
 } from './icons'
 import { focusPrimaryFilter, useShortcuts, type Shortcut } from '../lib/shortcuts'
 
@@ -71,13 +72,32 @@ type Section = {
   key: string
   /** The rail's glyph. See icons.tsx on why these carry their labels anyway. */
   Icon: (p: { className?: string }) => React.ReactElement
-  /* Who sees it. Undefined means everybody with platform scope.
+  /* Which row of the permission grid decides whether this is shown.
    *
-   * A list rather than the boolean this used to be, because two of the entries
-   * below belong to neither "the super admin" nor "everybody": Table 3.1 makes
-   * audit review and data requests the compliance officer's responsibility, and
-   * a boolean can only get one of those two wrong. */
-  roles?: Role[]
+   * This replaced a hand-written `roles?: Role[]` on each entry, and the reason
+   * is worth keeping. That list was one of three places encoding who may do
+   * what — the route guards being the second and a few service methods the
+   * third — and they had drifted in both directions: Ecosystem was
+   * super-admin-only here and open to every platform role at the API, while
+   * impersonation was the reverse. Nobody decided either; two lists simply
+   * moved apart.
+   *
+   * So the menu is now drawn from the same table the API enforces. A section
+   * appears when the signed-in role holds at least `need` on it, which is VIEW
+   * unless the screen's whole purpose is an act — Support access exists to
+   * borrow an identity, and offering it to somebody who may only look at it is
+   * offering a dead end.
+   *
+   * `section` is not optional. An entry without one would be a screen outside
+   * the grid, which is exactly the drift this ended. */
+  section: SectionKey
+  need?: Level
+  /* The one escape hatch from the grid, for the screen that edits the grid.
+   *
+   * See the Roles & permissions entry. Holding manager on User management is
+   * necessary but not sufficient: a permission table editable by anybody the
+   * table itself promotes is a ladder they can climb. */
+  superAdminOnly?: boolean
 }
 
 type Group = {
@@ -93,10 +113,13 @@ const GROUPS: Group[] = [
       /* No roles: everybody lands here. What it renders differs — the super
          admin gets the platform's figures, everybody else gets the queue of
          what is waiting on them. See Dashboard.tsx. */
-      { to: '/dashboard', label: 'Dashboard', key: 'd', Icon: IconDashboard },
+      { to: '/dashboard', label: 'Dashboard', key: 'd', Icon: IconDashboard,
+        section: 'dashboard' },
       // The aggregate meant to leave the building, so it belongs to whoever
-      // answers for the platform.
-      { to: '/ecosystem', label: 'Ecosystem', key: 'e', Icon: IconEcosystem, roles: ['SUPER_ADMIN'] },
+      // answers for the platform. Seeded to the super admin alone, which is
+      // what this entry always claimed and what the API now agrees with.
+      { to: '/ecosystem', label: 'Ecosystem', key: 'e', Icon: IconEcosystem,
+        section: 'ecosystem' },
     ],
   },
   {
@@ -109,43 +132,61 @@ const GROUPS: Group[] = [
        * different places. Reviewing IS deciding what the catalogue contains, so
        * they are one screen, and it sits here because the deciding is what has
        * somebody waiting on it. */
-      { to: '/scholarships', label: 'Scholarships', key: 'c', Icon: IconScholarships },
+      { to: '/scholarships', label: 'Scholarships', key: 'c', Icon: IconScholarships,
+        section: 'scholarships' },
       /* Second. A document here blocks one student; an unreviewed scheme blocks
          every student who would match it, which is why it sits below.
          Called Students rather than Verifications because that is what it now
          is: the queue is its default tab, and the other two are the only place
          a student's claims and their evidence appear side by side — which is
          where you go once the queue no longer holds them. */
-      { to: '/verifications', label: 'Students', key: 'f', Icon: IconVerifications },
-      { to: '/organisations', label: 'Organisations', key: 'o', Icon: IconOrganisations },
-      { to: '/grievances', label: 'Grievances', key: 'g', Icon: IconGrievances },
+      { to: '/verifications', label: 'Students', key: 'f', Icon: IconVerifications,
+        section: 'students' },
+      { to: '/organisations', label: 'Organisations', key: 'o', Icon: IconOrganisations,
+        section: 'organisations' },
+      { to: '/grievances', label: 'Grievances', key: 'g', Icon: IconGrievances,
+        section: 'grievances' },
     ],
   },
   {
     label: 'Published',
     sections: [
-      { to: '/messages', label: 'Messages', key: 'm', Icon: IconMessages },
-      { to: '/slides', label: 'Slides', key: 'l', Icon: IconSlides },
+      { to: '/messages', label: 'Messages', key: 'm', Icon: IconMessages,
+        section: 'messages' },
+      { to: '/slides', label: 'Slides', key: 'l', Icon: IconSlides,
+        section: 'slides' },
     ],
   },
   {
     label: 'Oversight',
     sections: [
-      /* Compliance as well as the super admin: Table 3.1 assigns audit review
-         to the compliance officer, and a compliance function that cannot read
-         the log is not enforcing anything. */
+      /* Compliance as well as the super admin, which is what the seed gives:
+         Table 3.1 assigns audit review to the compliance officer, and a
+         compliance function that cannot read the log is not enforcing
+         anything. */
       { to: '/audit', label: 'Audit trail', key: 'a', Icon: IconAudit,
-        roles: ['SUPER_ADMIN', 'COMPLIANCE'] },
-      // Signing in as somebody else. The narrowest door in the panel.
+        section: 'audit' },
+      /* Signing in as somebody else. The narrowest door in the panel, and the
+         one entry needing manager rather than view: the screen exists to borrow
+         an identity, so read-only access to it is a dead end rather than a
+         lesser version of the same thing. */
       { to: '/support', label: 'Support access', key: 's', Icon: IconSupport,
-        roles: ['SUPER_ADMIN'] },
-      /* Three roles, three different screens behind one link. The super admin
-         administers platform accounts; an administrator manages tenant members
-         and students; a staff member reads the same two lists. Nobody else has
-         any business here — a compliance officer looks an account up through
-         Support access, which is audited as a support action. */
+        section: 'support', need: 'MANAGE' },
+      /* Different screens behind one link, by what the caller may do rather
+         than by which role they hold: the super admin administers platform
+         accounts, an administrator manages tenant members and students, and
+         anybody with view alone reads the same two lists. */
       { to: '/users', label: 'User management', key: 'u', Icon: IconUsers,
-        roles: ['SUPER_ADMIN', 'ADMIN', 'STAFF'] },
+        section: 'users' },
+      /* Who may do all of the above.
+         *
+         * Not a section in the grid, deliberately, and so not filtered by one.
+         * A row that only the super admin can ever hold, and that cannot be
+         * lowered, is eleven greyed checkboxes inviting somebody to try — so
+         * this is the one entry still gated on the role, at every layer: the
+         * route, the service, and the policy on role_permission. */
+      { to: '/permissions', label: 'Roles & permissions', key: 'r', Icon: IconRoles,
+        section: 'users', need: 'MANAGE', superAdminOnly: true },
     ],
   },
 ]
@@ -158,7 +199,7 @@ interface Props {
 }
 
 export default function Layout({ counts = {} }: Props) {
-  const { context, impersonation, endImpersonation } = useAuth()
+  const { context, impersonation, endImpersonation, may } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -192,14 +233,22 @@ export default function Layout({ counts = {} }: Props) {
     () => GROUPS
       .map(g => ({
         ...g,
-        /* No list means everybody with platform scope. A list means those
-           roles and nobody else — and a group whose every section is filtered
-           out disappears with them, below, rather than leaving a heading over
-           nothing. */
-        sections: g.sections.filter(s => !s.roles || (!!role && s.roles.includes(role))),
+        /* Drawn from the permission grid, and a group whose every section is
+           filtered out disappears with them, below, rather than leaving a
+           heading over nothing.
+           *
+           * While `permissions` is still null — the moment between the session
+           * being established and the grid arriving — this yields nothing, so
+           * the rail is briefly empty. That is the correct thing to render for
+           * an unknown answer to "what may this person do": the alternative
+           * shows eleven links and withdraws some of them a tick later, which
+           * is both a flicker and a promise the API will not keep. */
+        sections: g.sections.filter(s =>
+          may(s.section, s.need ?? 'VIEW')
+          && (!s.superAdminOnly || role === 'SUPER_ADMIN')),
       }))
       .filter(g => g.sections.length > 0),
-    [role],
+    [may, role],
   )
 
   const sections = useMemo(() => groups.flatMap(g => g.sections), [groups])

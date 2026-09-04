@@ -15,6 +15,7 @@ import Login from './pages/Login'
 import SetPassword from './pages/SetPassword'
 import Users from './pages/Users'
 import Organisations from './pages/Organisations'
+import Permissions from './pages/Permissions'
 import Verifications from './pages/Verifications'
 import Slides from './pages/Slides'
 import Support from './pages/Support'
@@ -41,6 +42,8 @@ export default function App() {
 }
 
 function AuthenticatedApp() {
+  const { may } = useAuth()
+
   /* The three queues in the Decisions group, counted once at the shell.
    *
    * All three share a failure mode — nobody looks — and all three run against a
@@ -54,11 +57,28 @@ function AuthenticatedApp() {
    * decides what a queue IS; these three calls decide how each is counted, and
    * two of them return a figure set directly rather than a page of one row.
    */
+  /* Each count is fetched only where the role may read the section.
+   *
+   * Not an optimisation. These four run at the shell on every screen, and a
+   * role without the section gets a 403 from each — which lands in the audit
+   * trail as a denied access attempt, four times per navigation, for somebody
+   * doing nothing wrong. The log is what a compliance officer reads to find
+   * real refusals, and burying it under routine ones is how it stops being
+   * read.
+   *
+   * A skipped query leaves the badge at zero, which is right: a section that is
+   * not in the sidebar has nowhere to hang a number.
+   *
+   * `may` returns false until the grid arrives, so the first paint counts
+   * nothing and the badges appear a tick later. Better than the reverse — four
+   * requests fired before we know whether they are allowed. */
   const pending = useQuery<Organisation[]>(
-    signal => api.get('/admin/organisations', {
-      status: 'PENDING_APPROVAL', page_size: 1,
-    }, signal),
-    [],
+    signal => may('organisations')
+      ? api.get('/admin/organisations', {
+          status: 'PENDING_APPROVAL', page_size: 1,
+        }, signal)
+      : Promise.resolve({ data: [] }),
+    [may],
   )
 
   /* Like the review counts, this endpoint returns the figure set directly
@@ -68,13 +88,17 @@ function AuthenticatedApp() {
      decision is taken — one source, so the badge and the screen it points at
      cannot disagree. page_size 1: only the counts are wanted. */
   const catalogue = useQuery<Catalogue>(
-    signal => api.get('/admin/scholarships', { page_size: 1 }, signal),
-    [],
+    signal => may('scholarships')
+      ? api.get('/admin/scholarships', { page_size: 1 }, signal)
+      : Promise.resolve({ data: { counts: { pending: 0 } } as Catalogue }),
+    [may],
   )
 
   const verifications = useQuery<VerificationCounts>(
-    signal => api.get('/admin/verifications/counts', undefined, signal),
-    [],
+    signal => may('students')
+      ? api.get('/admin/verifications/counts', undefined, signal)
+      : Promise.resolve({ data: { waiting: 0 } as VerificationCounts }),
+    [may],
   )
 
   /* Overdue, not open. The grievance queue is sorted by breach and was the one
@@ -83,8 +107,10 @@ function AuthenticatedApp() {
    * permanently, which is a badge nobody reads. `overdue=true` counts the ones
    * past the date the student was promised. */
   const grievances = useQuery<unknown[]>(
-    signal => api.get('/grievances', { overdue: 'true', page_size: 1 }, signal),
-    [],
+    signal => may('grievances')
+      ? api.get('/grievances', { overdue: 'true', page_size: 1 }, signal)
+      : Promise.resolve({ data: [] }),
+    [may],
   )
 
   const counts: QueueCounts = {
@@ -113,6 +139,15 @@ function AuthenticatedApp() {
         <Route path="/audit" element={<Audit />} />
         <Route path="/support" element={<Support />} />
         <Route path="/users" element={<Users />} />
+        {/* Mounted for everybody, like every other route here.
+          *
+          * The panel has never gated routes by role — the sidebar decides what
+          * is offered and the API decides what is answered, so a URL typed by
+          * hand reaches a screen that renders its own error. That holds here:
+          * GET /admin/permissions is super-admin-only at the route, the service
+          * and the row-level policy, so anybody else who navigates here gets
+          * the ErrorState the screen draws from a 403 rather than a grid. */}
+        <Route path="/permissions" element={<Permissions />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

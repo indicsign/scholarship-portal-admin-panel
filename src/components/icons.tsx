@@ -146,6 +146,20 @@ export const IconUsers = (p: IconProps) => (
   </Svg>
 )
 
+/* A grid with ticks: rows against columns, which is literally what the screen
+ * is. Deliberately not a key or a padlock — both say "security" and neither says
+ * "a table of who may do what", and a padlock beside IconUsers would read as
+ * locking accounts rather than as setting their reach. */
+export const IconRoles = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M3 9h18" />
+    <path d="M9 9v11" />
+    <path d="M11.4 12.6l1.4 1.4 2.6-2.8" />
+    <path d="M11.4 17.1l1.4 1.4 2.6-2.8" />
+  </Svg>
+)
+
 /** A mortarboard: what the money is for. */
 export const IconScholarships = (p: IconProps) => (
   <Svg {...p}>

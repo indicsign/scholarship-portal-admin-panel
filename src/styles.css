@@ -2169,3 +2169,119 @@ kbd {
    label names the document, and the pane it opens states the verification in
    full — so this is a marker for scanning, not the only carrier of the fact. */
 .tab-tick { color: var(--accent); font-weight: 700; }
+
+/* --- roles & permissions -------------------------------------------------------
+ *
+ * Eleven sections against five roles. Drawn as one small table per section
+ * rather than one 55-cell grid, and that is the whole layout decision.
+ *
+ * A single grid puts sections down the side and roles across the top, which
+ * reads beautifully on a laptop and fails in the two places that matter. It
+ * needs a scroll container by 900px, and a horizontally scrolled grid moves the
+ * row label away from the checkbox it labels — so an operator ticking a box in
+ * the fourth column is trusting their memory of which row they are on, in the
+ * one screen where a mistake hands somebody access. And a screen reader
+ * announces a grid cell by its row and column headers, which works only while
+ * both are still on screen for a sighted user to cross-check.
+ *
+ * Per section, every table is five rows by five columns, fits at 320px without
+ * scrolling, and carries its own heading. The cost is eleven headings instead of
+ * one table, which is more scrolling and no ambiguity.
+ */
+
+.perm-group { margin-bottom: 1.75rem; }
+.perm-group > h2 {
+  font-size: 12px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin: 0 0 0.5rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.perm-section { margin: 0 0 1rem; }
+.perm-section > h3 {
+  font-size: 14px; font-weight: 600; margin: 0 0 0.35rem;
+}
+
+/* Centred under its column heading, so the tick sits where the word above it
+   points rather than left-aligned like the text cells beside it. */
+.perm-cell { text-align: center; vertical-align: middle; }
+
+/* The label is the hit area, not the 13px box.
+ *
+ * WCAG 2.2 asks for 24px minimum and the house floor is 48; a bare checkbox is
+ * neither. Padding the label to 44px in a table cell that is already 40 tall
+ * gives a target the whole cell wide, which is what somebody using this on a
+ * tablet actually presses. The box itself is scaled up as well, because a
+ * 13px tick is hard to read as ticked at a glance and this screen is scanned
+ * far more often than it is edited.
+ */
+.perm-cell .check {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 44px; min-width: 44px;
+  margin: -0.4rem -0.2rem; /* absorbs the td padding so the target fills it */
+  cursor: pointer;
+}
+.perm-cell .check input {
+  width: 18px; height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.perm-cell .check input:disabled { cursor: not-allowed; opacity: 0.45; }
+
+/* What the held level permits, in the words of the acts it allows. The widest
+   column, because it is the one being read; capped so it does not run to a
+   line length nobody tracks across. */
+.perm-meaning {
+  color: var(--text-muted); font-size: 12px; line-height: 1.5;
+  max-width: 44ch;
+}
+
+/* The blast radius, under the role's name. Its own line rather than beside it:
+   at 320px "Super Admin 2 accounts" wraps into something that reads as a name. */
+.perm-section .holders {
+  display: block; font-size: 11px; font-weight: 400;
+}
+
+/* The role's name stays put while its checkboxes scroll.
+ *
+ * Five columns fit at 320px only if the meaning column is dropped, and it is
+ * the column being read — so the table scrolls, like every other table in the
+ * panel. Scrolling alone was not good enough here: rendered at 320 the name
+ * left the screen before the Manager column arrived, so somebody ticking a box
+ * was trusting their memory of which row they were on, in the one screen where
+ * that mistake hands out access. Pinning the row header is what makes the
+ * horizontal scroll safe.
+ *
+ * --bg rather than --surface, because these tables sit directly on the page and
+ * a transparent sticky cell lets the scrolled checkboxes slide visibly beneath
+ * the words. The header cell pins in both directions at once — thead th is
+ * already sticky to the top for the impersonation banner — and needs the higher
+ * z-index so the corner lands above both. */
+.perm-section th[scope="row"] {
+  position: sticky; left: 0; z-index: 1;
+  background: var(--bg);
+  white-space: nowrap;
+}
+.perm-section thead th:first-child {
+  position: sticky; left: 0; z-index: 2;
+}
+/* The pinned cell keeps its own background, so it does not take the row tint
+   the rest of the row gets. Restated here rather than left inconsistent. */
+.perm-section tbody tr:hover th[scope="row"] { background: var(--surface-sunken); }
+
+/* A label and its control on one line, for a filter that is a single select.
+   .filters above stacks label over control, which is right for a form and too
+   tall for one dropdown above a table. */
+.inline-field {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font-size: 13px; color: var(--text-muted);
+}
+.inline-field select { min-height: 32px; }
+
+.toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap; margin: 0.75rem 0 1.25rem;
+}
+.toolbar p { margin: 0; font-size: 13px; }

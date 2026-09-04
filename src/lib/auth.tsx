@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 
 import * as api from './api'
 import { AuthContext, type AuthApi, type AuthState } from './auth-context'
+import { can as allowedBy, type Level, type Permissions, type Section } from './permissions'
 import { isPlatformRole } from './roles'
 import type { LoginResult, Role } from './types'
 
@@ -27,6 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     context: null,
     contexts: [],
     impersonation: null,
+    permissions: null,
     error: null,
   })
 
@@ -49,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // the difference between one clear sentence and a wall of failures.
       api.setAccessToken(null)
       setState({
-        status: 'anonymous', account: null, context: null, contexts: [],
+        status: 'anonymous', account: null, context: null, contexts: [], permissions: null,
         impersonation: null,
         error: 'This account does not have access to the admin panel. '
              + 'Sign in to the portal for your organisation instead.',
@@ -70,6 +72,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         context: result.active_context,
         contexts: result.contexts,
         impersonation: null,
+        // Not fetched here. Nothing but the password form is rendered until one
+        // of their own is chosen, so there is no sidebar to draw and no reason
+        // to spend a request on a grid nothing will read.
+        permissions: null,
         error: null,
       })
       return
@@ -81,6 +87,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       context: result.active_context,
       contexts: result.contexts,
       impersonation: null,
+      /* Left null and filled in by the effect below.
+       *
+       * Not awaited here, and that is deliberate: applyLogin runs on the reload
+       * path too, and blocking the whole panel on a second round trip is what
+       * the portal's first-paint work spent a week undoing. The sidebar renders
+       * empty for one tick instead — see AuthState.permissions for why empty
+       * rather than full is the right thing to render while it is unknown. */
+      permissions: null,
       error: null,
     })
   }, [])
@@ -104,7 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     pending.current = null
     if (impersonationTimer.current) window.clearTimeout(impersonationTimer.current)
     setState({
-      status: 'anonymous', account: null, context: null, contexts: [],
+      status: 'anonymous', account: null, context: null, contexts: [], permissions: null,
       impersonation: null, error: null,
     })
   }, [])
@@ -136,7 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api.setAuthLostHandler(() => {
       api.setAccessToken(null)
       setState({
-        status: 'anonymous', account: null, context: null, contexts: [],
+        status: 'anonymous', account: null, context: null, contexts: [], permissions: null,
         impersonation: null,
         error: 'Your session has ended. Please sign in again.',
       })
@@ -206,14 +220,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [signOut])
 
+  /* Fetch the caller's own grid once the session is real.
+   *
+   * Keyed on the role rather than on `status` alone, so switching context —
+   * and starting or ending a support session, which replaces the role on the
+   * token — re-reads it. Impersonation is the case that makes this necessary:
+   * during a session the token carries the target's role, and a sidebar still
+   * drawn from the operator's own permissions would offer screens the API is
+   * now refusing.
+   *
+   * A failure leaves it null, which draws nothing rather than everything. That
+   * is a visibly broken panel instead of a quietly wrong one, and the operator
+   * can reload; the alternative fails open on an authorisation question.
+   */
+  const role = state.context?.role
+  const authenticated = state.status === 'authenticated'
+
+  useEffect(() => {
+    if (!authenticated || !role) return
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const res = await api.get<{ sections: Permissions }>('/admin/my-permissions')
+        if (!cancelled) setState(s => ({ ...s, permissions: res.data.sections }))
+      } catch {
+        if (!cancelled) setState(s => ({ ...s, permissions: null }))
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [authenticated, role])
+
   const can = useCallback(
     (...roles: Role[]) => !!state.context && roles.includes(state.context.role),
     [state.context],
   )
 
+  const may = useCallback(
+    (section: Section, need: Level = 'VIEW') => allowedBy(state.permissions, section, need),
+    [state.permissions],
+  )
+
   const value = useMemo<AuthApi>(
-    () => ({ ...state, signIn, setPassword, signOut, startImpersonation, endImpersonation, can }),
-    [state, signIn, setPassword, signOut, startImpersonation, endImpersonation, can],
+    () => ({ ...state, signIn, setPassword, signOut, startImpersonation, endImpersonation, can, may }),
+    [state, signIn, setPassword, signOut, startImpersonation, endImpersonation, can, may],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
