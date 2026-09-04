@@ -3,6 +3,7 @@ import { useState } from 'react'
 import * as api from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import { count, humanise, relative, timestamp } from '../lib/format'
+import { roleLabel } from '../lib/roles'
 import { Empty, ErrorState, Field, Loading, Pager, Pill } from '../components/ui'
 import SplitView, { DetailEmpty, QueueItem } from '../components/SplitView'
 import { Stat } from '../components/charts'
@@ -347,7 +348,7 @@ function Detail({
                 <option value="">Nobody — return to the pool</option>
                 {handlers.map(h => (
                   <option key={h.user_id} value={h.user_id}>
-                    {h.label} · {humanise(h.role)}
+                    {h.label} · {roleLabel(h.role)}
                   </option>
                 ))}
               </select>

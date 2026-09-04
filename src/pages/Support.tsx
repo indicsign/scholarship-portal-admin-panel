@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 import * as api from '../lib/api'
 import { useAuth } from '../lib/auth-context'
-import { isPlatformRole } from '../lib/roles'
+import { isPlatformRole, roleLabel } from '../lib/roles'
 import { humanise, relative } from '../lib/format'
 import { Dialog, Empty, ErrorState, Field, Loading, Pill } from '../components/ui'
 import { useDebounced, useQuery } from '../lib/hooks'
@@ -143,7 +143,7 @@ export default function Support() {
                           <div className="row" style={{ gap: '0.25rem' }}>
                             {u.roles.length === 0
                               ? <span className="faint">No role yet</span>
-                              : u.roles.map(r => <Pill key={r}>{humanise(r)}</Pill>)}
+                              : u.roles.map(r => <Pill key={r}>{roleLabel(r)}</Pill>)}
                           </div>
                         </td>
                         <td>

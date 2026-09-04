@@ -4,11 +4,11 @@ import * as api from '../lib/api'
 import { DocumentsDialog } from './DocumentsDialog'
 import { ApiError, errorDetail } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
-import { date, humanise } from '../lib/format'
+import { date } from '../lib/format'
 import { Dialog, Empty, ErrorState, Field, Loading, Pill, StatusPill } from '../components/ui'
 import { useDebounced, useQuery } from '../lib/hooks'
 import { useAnnounce } from '../lib/announce'
-import { PLATFORM_ROLES, roleLabel } from '../lib/roles'
+import { PLATFORM_ROLES, PLATFORM_ROLE_GROUPS, roleLabel } from '../lib/roles'
 import type { PlatformUser, Role } from '../lib/types'
 
 /* User management.
@@ -69,16 +69,32 @@ const ADMIN_ROLE_FOR: Record<string, Role | undefined> = {
 
 type Tab = 'platform' | 'organisation' | 'student'
 
-const TABS: { id: Tab; label: string; hint: string }[] = [
-  { id: 'platform', label: 'Platform', hint: 'Super admins, staff and compliance officers.' },
+/* empty is stated per tab rather than built from the label.
+ *
+ * It used to be `No ${label.toLowerCase()} users`, which worked while every
+ * label was a noun that could take "users" after it. "Our team" cannot — "No
+ * our team users" — and a label is a heading, not a fragment of a sentence
+ * somewhere else. */
+const TABS: { id: Tab; label: string; hint: string; empty: string }[] = [
+  /* "Our team", not "Platform".
+   *
+   * The other two tabs are people outside the building; this is the only one
+   * that is us, and the tab set reads as three categories of person either
+   * way. "Platform" also collided with the platform-scope roles listed in the
+   * hint, so the tab and its own contents were the same word. */
+  { id: 'platform', label: 'Our team',
+    hint: 'Super admins, staff and compliance officers.',
+    empty: 'Nobody is on the team yet' },
   /* "Organisation members", not "Organisations". The sidebar has an
      Organisations section and it is a different thing — the register of tenants
      and the queue for approving them. This tab is the people who act for one,
-     which is why it sits beside Platform and Students: all three are categories
+     which is why it sits beside Our team and Students: all three are categories
      of person. */
   { id: 'organisation', label: 'Organisation members',
-    hint: 'People acting for an NGO, a company, a department or a private body.' },
-  { id: 'student', label: 'Students', hint: 'Applicants. They register themselves.' },
+    hint: 'People acting for an NGO, a company, a department or a private body.',
+    empty: 'No organisation members' },
+  { id: 'student', label: 'Students', hint: 'Applicants. They register themselves.',
+    empty: 'No students' },
 ]
 
 export default function Users() {
@@ -193,7 +209,7 @@ export default function Users() {
           * organisation, which creates one for them. */}
         {superAdmin && activeTab !== 'student' && (
           <button className="primary" onClick={() => setAdding(true)}>
-            {activeTab === 'platform' ? 'Add to platform' : 'Add an organisation admin'}
+            {activeTab === 'platform' ? 'Add to our team' : 'Add an organisation admin'}
           </button>
         )}
       </div>
@@ -230,7 +246,7 @@ export default function Users() {
         {query.error ? <ErrorState error={query.error} onRetry={query.reload} /> : null}
         {query.data && query.data.length === 0 && (
           <Empty
-            title={search ? 'Nothing matches that' : `No ${current.label.toLowerCase()} users`}
+            title={search ? 'Nothing matches that' : current.empty}
             hint={search ? 'Try part of an email address.' : undefined}
           />
         )}
@@ -492,8 +508,15 @@ function AddDialog({
   return (
     <Dialog
       open
+      /* "our team" rather than "the platform".
+       *
+       * The platform is the thing these people run; it is not the thing they
+       * join. Every other account on this screen belongs to somebody outside
+       * the building — a publisher's staff, a student — and this tab is the
+       * only one that is us, which is worth saying in the words rather than
+       * leaving to the tab label. */
       title={kind === 'platform'
-        ? 'Add someone to the platform'
+        ? 'Add someone to our team'
         : 'Add an organisation administrator'}
       onClose={onClose}
       footer={
@@ -607,13 +630,31 @@ function AddDialog({
           ? 'Set by the kind of organisation. They add everybody else themselves.'
           : undefined}
       >
+        {/* Grouped for a platform account, flat for an organisation — which
+            offers exactly one role, and an <optgroup> around a single option is
+            a heading explaining nothing.
+
+            roleLabel, not humanise: humanise leaves any all-caps word of five
+            letters or fewer alone on the assumption it is an acronym, so this
+            list read ADMIN, STAFF and GOVT while the table beside it read
+            Admin, Staff and Government. roles.ts says as much in the comment
+            over ROLE_LABELS; these two selects were the callers that never got
+            the message. */}
         {props => (
           <select
             {...props}
             value={role}
             onChange={e => setRole(e.target.value as Role)}
           >
-            {roles.map(r => <option key={r} value={r}>{humanise(r)}</option>)}
+            {kind === 'platform'
+              ? PLATFORM_ROLE_GROUPS.map(g => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.roles.map(r => (
+                    <option key={r} value={r}>{roleLabel(r)}</option>
+                  ))}
+                </optgroup>
+              ))
+              : roles.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
           </select>
         )}
       </Field>
@@ -704,8 +745,20 @@ function RolesDialog({
         <>
           <Field label="Grant another platform role">
             {props => (
+              /* Same grouping as the add form, minus what this account already
+                 holds — and a group whose whole contents are held disappears
+                 rather than becoming an empty heading. */
               <select {...props} value={role} onChange={e => setRole(e.target.value as Role)}>
-                {grantable.map(r => <option key={r} value={r}>{humanise(r)}</option>)}
+                {PLATFORM_ROLE_GROUPS.map(g => {
+                  const offer = g.roles.filter(r => grantable.includes(r))
+                  return offer.length === 0 ? null : (
+                    <optgroup key={g.label} label={g.label}>
+                      {offer.map(r => (
+                        <option key={r} value={r}>{roleLabel(r)}</option>
+                      ))}
+                    </optgroup>
+                  )
+                })}
               </select>
             )}
           </Field>
