@@ -29,6 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     contexts: [],
     impersonation: null,
     permissions: null,
+    permissionsState: 'loading',
     error: null,
   })
 
@@ -51,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // the difference between one clear sentence and a wall of failures.
       api.setAccessToken(null)
       setState({
-        status: 'anonymous', account: null, context: null, contexts: [], permissions: null,
+        status: 'anonymous', account: null, context: null, contexts: [], permissions: null, permissionsState: 'loading',
         impersonation: null,
         error: 'This account does not have access to the admin panel. '
              + 'Sign in to the portal for your organisation instead.',
@@ -75,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Not fetched here. Nothing but the password form is rendered until one
         // of their own is chosen, so there is no sidebar to draw and no reason
         // to spend a request on a grid nothing will read.
-        permissions: null,
+        permissions: null, permissionsState: 'loading',
         error: null,
       })
       return
@@ -87,14 +88,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       context: result.active_context,
       contexts: result.contexts,
       impersonation: null,
-      /* Left null and filled in by the effect below.
+      /* Left unknown and filled in by the effect below.
        *
        * Not awaited here, and that is deliberate: applyLogin runs on the reload
        * path too, and blocking the whole panel on a second round trip is what
-       * the portal's first-paint work spent a week undoing. The sidebar renders
-       * empty for one tick instead — see AuthState.permissions for why empty
-       * rather than full is the right thing to render while it is unknown. */
+       * the portal's first-paint work spent a week undoing. The sidebar is empty
+       * for one tick instead, which is a flicker rather than a wrong answer —
+       * see `may` for the three states and what each renders. */
       permissions: null,
+      permissionsState: 'loading',
       error: null,
     })
   }, [])
@@ -118,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     pending.current = null
     if (impersonationTimer.current) window.clearTimeout(impersonationTimer.current)
     setState({
-      status: 'anonymous', account: null, context: null, contexts: [], permissions: null,
+      status: 'anonymous', account: null, context: null, contexts: [], permissions: null, permissionsState: 'loading',
       impersonation: null, error: null,
     })
   }, [])
@@ -150,7 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api.setAuthLostHandler(() => {
       api.setAccessToken(null)
       setState({
-        status: 'anonymous', account: null, context: null, contexts: [], permissions: null,
+        status: 'anonymous', account: null, context: null, contexts: [], permissions: null, permissionsState: 'loading',
         impersonation: null,
         error: 'Your session has ended. Please sign in again.',
       })
@@ -243,9 +245,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ;(async () => {
       try {
         const res = await api.get<{ sections: Permissions }>('/admin/my-permissions')
-        if (!cancelled) setState(s => ({ ...s, permissions: res.data.sections }))
+        if (!cancelled) {
+          setState(s => ({ ...s, permissions: res.data.sections, permissionsState: 'ready' }))
+        }
       } catch {
-        if (!cancelled) setState(s => ({ ...s, permissions: null }))
+        /* Unavailable, which is NOT the same as "you may do nothing".
+         *
+         * The most likely cause is an API that predates this feature: the
+         * endpoint 404s, and every section would read as denied. Rendering that
+         * literally empties the sidebar — the panel loses its entire navigation
+         * because of a deployment ordering, which is a far worse outcome than
+         * anything the grid was built to prevent.
+         *
+         * `may` therefore returns true in this state; see there. The first
+         * version of this returned false, on the reasoning that an unknown
+         * answer to "what may this person do" should deny. That reasoning is
+         * right for an enforcement layer and wrong for this one: nothing here
+         * enforces anything. Every endpoint behind every link carries the same
+         * check server-side, so the worst a permissive fallback can produce is a
+         * link that answers 403 — which is exactly how the panel behaved before
+         * the grid existed.
+         */
+        if (!cancelled) {
+          setState(s => ({ ...s, permissions: null, permissionsState: 'unavailable' }))
+        }
       }
     })()
 
@@ -257,9 +280,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [state.context],
   )
 
+  /* Three states, because "not yet known" and "denied" are different answers.
+   *
+   *   loading      the fetch is in flight. Denies, so the rail is briefly empty
+   *                rather than showing eleven links and withdrawing three a tick
+   *                later — a flicker, and a promise the API would not keep.
+   *   ready        the grid decides.
+   *   unavailable  the endpoint could not be read, most likely an API that
+   *                predates it. Allows everything, so the panel keeps working
+   *                against an older server. See the fetch above for why a
+   *                permissive fallback is correct HERE and would not be in the
+   *                middleware: this draws, it never allows. */
   const may = useCallback(
-    (section: Section, need: Level = 'VIEW') => allowedBy(state.permissions, section, need),
-    [state.permissions],
+    (section: Section, need: Level = 'VIEW') => {
+      if (state.permissionsState === 'unavailable') return true
+      if (state.permissionsState === 'loading') return false
+      return allowedBy(state.permissions, section, need)
+    },
+    [state.permissions, state.permissionsState],
   )
 
   const value = useMemo<AuthApi>(

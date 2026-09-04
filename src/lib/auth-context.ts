@@ -16,14 +16,29 @@ export interface AuthState {
   impersonation: { sessionId: string; actingAs: Context; notice: string } | null
   /* What this role may do, section by section, from GET /admin/my-permissions.
    *
-   * Null until it has been fetched, and null is NOT "everything" — `can` below
-   * reads it as nothing. That is the direction it has to fail in: a sidebar
-   * drawn before the grid arrives should be empty for a moment rather than
-   * offer eleven links, three of which the API is about to refuse.
+   * Null until it has been fetched, and null on its own says nothing about what
+   * is allowed — permissionsState below is what distinguishes "not yet" from
+   * "could not be read", and the two render differently.
    *
-   * Also null during a support session, where the role on the token belongs to
+   * Re-fetched during a support session, where the role on the token belongs to
    * the person being impersonated. See the fetch in AuthProvider. */
   permissions: Permissions | null
+  /* Whether the grid above is known.
+   *
+   *   loading      the fetch is in flight. Nothing is drawn — a flicker, not a
+   *                wrong answer.
+   *   ready        the grid decides.
+   *   unavailable  it could not be read, most likely an API that predates the
+   *                endpoint. EVERYTHING is drawn, so the panel keeps working
+   *                against an older server rather than losing its whole
+   *                navigation to a deployment ordering.
+   *
+   * That last one is only safe because nothing on this side enforces anything.
+   * Every endpoint behind every link carries the same check server-side, so a
+   * permissive fallback costs a link that answers 403 — which is how the panel
+   * behaved before the grid existed. The same fallback in the middleware would
+   * be a privilege escalation. */
+  permissionsState: 'loading' | 'ready' | 'unavailable'
   error: string | null
 }
 
