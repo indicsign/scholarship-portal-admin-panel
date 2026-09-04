@@ -712,3 +712,46 @@ export interface ReviewState {
   review_note?: string
   pending_revision?: Revision
 }
+
+/* What happened to the credential an invitation was supposed to carry.
+ *
+ * The panel used to say "A temporary password has been emailed" the moment an
+ * account was created, before anything was known about the send. On 2026-09-05
+ * that was wrong twice in one morning: the mail was delivered and carried no
+ * password, because the template id in the environment pointed at a
+ * "your password has been changed" notice with no password placeholder in it.
+ * Two accounts were created and neither could be signed into.
+ *
+ * So the server now reports what actually happened, and hands back the
+ * credential. See identity.InvitationOutcome for why it does that even on a
+ * successful send: the provider renders the template and does not say which
+ * placeholders it filled, so delivery is not evidence that the recipient holds
+ * anything usable.
+ */
+export interface InvitationOutcome {
+  /** The provider accepted the mail. Not proof the recipient can sign in. */
+  delivered: boolean
+  /** False when no password was minted — the address already had an account. */
+  sent: boolean
+  to?: string
+  /** Present whenever one was minted. The only copy; the row holds a hash. */
+  temporary_password?: string
+  /** The provider's own words, when it refused. */
+  reason?: string
+}
+
+export interface CreatedUser {
+  user: PlatformUser
+  invitation: InvitationOutcome
+}
+
+/** The answer to a password reset. `temporary_password` only for delivery "show". */
+export interface ResetResult {
+  message: string
+  reset: {
+    delivery: 'email' | 'show'
+    to?: string
+    temporary_password?: string
+    hours: number
+  }
+}

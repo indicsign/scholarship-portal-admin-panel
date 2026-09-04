@@ -2285,3 +2285,49 @@ kbd {
   gap: 1rem; flex-wrap: wrap; margin: 0.75rem 0 1.25rem;
 }
 .toolbar p { margin: 0; font-size: 13px; }
+
+/* --- a credential shown once ---------------------------------------------------
+ *
+ * The temporary password, on the dialog that hands it to an operator. Sized and
+ * spaced to be read off a screen and typed into another machine, or read aloud
+ * down a telephone, because both of those are how it actually travels when email
+ * has failed.
+ *
+ * Real selectable text, never an image and never masked. Masking it behind a
+ * reveal would mean an extra press before it can be copied, on a dialog whose
+ * heading already says what it holds — friction with no security in it. And a
+ * password rendered as an image cannot be copied, cannot be read by a screen
+ * reader, and cannot be enlarged by anybody who needs it larger.
+ */
+.credential {
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  margin: 0.75rem 0 0.6rem;
+}
+.credential-label {
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+/* 20px and a wide word-space, on the same reasoning the email template uses:
+   the value is 17 characters in three hyphenated groups, and the groups are what
+   somebody keeps their place with. break-all is the guard for a narrow window —
+   a broken password that can still be selected beats one running off the edge. */
+.credential-value {
+  margin-top: 0.3rem;
+  font-family: var(--mono);
+  font-size: 20px; line-height: 1.45; font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  word-break: break-all;
+  /* Selectable by double-click as one run rather than three, so copying by hand
+     does not silently drop a group. */
+  user-select: all;
+}
+
+.credential-actions {
+  display: flex; align-items: center; gap: 0.6rem;
+  margin-bottom: 0.85rem;
+}

@@ -9,7 +9,8 @@ import { Dialog, Empty, ErrorState, Field, Loading, Pill, StatusPill } from '../
 import { useDebounced, useQuery } from '../lib/hooks'
 import { useAnnounce } from '../lib/announce'
 import { PLATFORM_ROLES, PLATFORM_ROLE_GROUPS, roleLabel } from '../lib/roles'
-import type { PlatformUser, Role } from '../lib/types'
+import TemporaryPassword from '../components/TemporaryPassword'
+import type { CreatedUser, PlatformUser, ResetResult, Role } from '../lib/types'
 
 /* User management.
  *
@@ -151,9 +152,22 @@ export default function Users() {
      that never became a student has none. */
   const [reviewing, setReviewing] = useState<PlatformUser | null>(null)
 
+  /* A temporary password waiting to be read.
+   *
+   * Held here rather than inside the dialog that produced it, because the
+   * AddDialog closes on success and its state goes with it. Losing this would
+   * lose the only copy of the credential in existence — the row holds a hash and
+   * the audit trail never records one. */
+  const [credential, setCredential] = useState<{
+    who: string
+    password: string
+    delivered: boolean
+    reason?: string
+  } | null>(null)
+
   async function act(
     u: PlatformUser,
-    what: 'suspend' | 'reinstate' | 'remove' | 'signout' | 'reset',
+    what: 'suspend' | 'reinstate' | 'remove' | 'signout' | 'reset' | 'reset-show',
   ) {
     const who = u.email ?? u.phone ?? 'that account'
     const wasDeactivated = u.status === 'DEACTIVATED'
@@ -182,7 +196,7 @@ export default function Users() {
           + 'so they can sign straight back in.',
           'ok',
         )
-      } else if (what === 'reset') {
+      } else if (what === 'reset' || what === 'reset-show') {
         /* The larger act: a new temporary password, emailed.
          *
          * The server sends the mail before it writes the password, so a failure
@@ -193,13 +207,26 @@ export default function Users() {
          * Announced as "emailed", not "reset". What the operator needs to know
          * is that the credential now lives in somebody else's inbox and expires,
          * because the next question they get is "how long do I have". */
-        await api.post(`/admin/accounts/${u.user_id}/reset-password`)
-        announce(
-          `A temporary password has been emailed to ${who}. It lasts 24 hours, and `
-          + 'they will be asked to choose their own when they sign in. Every other '
-          + 'session has been signed out.',
-          'ok',
+        /* Two ways, and the second is why an account is recoverable when
+         * email is not working at all.
+         *
+         * `reset` mails it and changes nothing if the mail fails — the ordering
+         * that stops a reset destroying the account it was run on.
+         * `reset-show` does not mail it and hands it back once, for the operator
+         * to deliver themselves. The server records which happened. */
+        const res = await api.post<ResetResult>(
+          `/admin/accounts/${u.user_id}/reset-password`,
+          { delivery: what === 'reset-show' ? 'show' : 'email' },
         )
+
+        if (res.data.reset.temporary_password) {
+          setCredential({
+            who,
+            password: res.data.reset.temporary_password,
+            delivered: false,
+          })
+        }
+        announce(res.data.message, 'ok')
       } else {
         await api.patch(`/admin/accounts/${u.user_id}`, {
           status: what === 'suspend' ? 'SUSPENDED' : 'ACTIVE',
@@ -454,6 +481,40 @@ export default function Users() {
                               </button>
                             )}
 
+                            {/* The same act, delivered by hand.
+                              *
+                              * This is the way back into an account when email
+                              * is not working — which is not a hypothetical
+                              * here. On 2026-09-05 every invitation and reset
+                              * was delivered carrying no password at all,
+                              * because the registered template was a
+                              * "your password has been changed" notice, and two
+                              * accounts had no route back in at all.
+                              *
+                              * Beside the emailed button rather than replacing
+                              * it, and second, because emailing is still the
+                              * right default: it puts the credential in the
+                              * account's own inbox rather than on a screen and
+                              * in somebody's memory. This one is for when that
+                              * has demonstrably failed.
+                              *
+                              * Super admin only, in the panel and in the
+                              * service. Emailing sends the password where only
+                              * its owner can read it, which is what makes it
+                              * safe for an administrator; reading it out turns
+                              * "reset somebody's password" into "take somebody's
+                              * account". */}
+                            {!dead && !isSelf && superAdmin && (
+                              <button className="sm" onClick={() => act(u, 'reset-show')}>
+                                Reset &amp; show
+                                <span className="sr-only">
+                                  {' '}— sets a new temporary password for
+                                  {' '}{u.email ?? u.phone} and shows it here
+                                  instead of emailing it
+                                </span>
+                              </button>
+                            )}
+
                             {/* Reinstate covers both ways back: a suspended
                               * account resumes with what it had, a deactivated
                               * one comes back with its roles still revoked. The
@@ -493,6 +554,7 @@ export default function Users() {
         <AddDialog
           kind={activeTab === 'platform' ? 'platform' : 'organisation'}
           onClose={() => setAdding(false)}
+          onCredential={setCredential}
           onDone={msg => {
             setAdding(false)
             announce(msg, 'ok')
@@ -507,6 +569,16 @@ export default function Users() {
           onClose={() => setEditing(null)}
           onChanged={msg => { announce(msg, 'ok'); query.reload() }}
           onDone={() => setEditing(null)}
+        />
+      )}
+
+      {credential && (
+        <TemporaryPassword
+          who={credential.who}
+          password={credential.password}
+          delivered={credential.delivered}
+          reason={credential.reason}
+          onClose={() => setCredential(null)}
         />
       )}
 
@@ -529,11 +601,16 @@ export default function Users() {
  * buried inside one.
  */
 function AddDialog({
-  kind, onClose, onDone,
+  kind, onClose, onDone, onCredential,
 }: {
   kind: 'platform' | 'organisation'
   onClose: () => void
   onDone: (message: string) => void
+  /* Raised to the page rather than shown here, because this dialog unmounts on
+     success and the password would go with it. */
+  onCredential: (c: {
+    who: string; password: string; delivered: boolean; reason?: string
+  }) => void
 }) {
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
@@ -564,14 +641,47 @@ function AddDialog({
     setError(null)
     setFields({})
     try {
-      await api.post('/admin/accounts', {
+      const res = await api.post<CreatedUser>('/admin/accounts', {
         email,
         phone: phone || undefined,
         role,
         organisation: kind === 'organisation' ? org.trim() : undefined,
         organisation_type: kind === 'organisation' && orgType ? orgType : undefined,
       })
-      onDone(`${email} added as ${roleLabel(role).toLowerCase()}. A temporary password has been emailed.`)
+
+      /* What actually happened, rather than what usually happens.
+       *
+       * This line used to read "A temporary password has been emailed", printed
+       * unconditionally the moment the account was created and before anything
+       * was known about the send. It was wrong twice over on 2026-09-05: the
+       * mail was delivered and carried no password, and the panel said so
+       * confidently while two accounts sat unusable.
+       *
+       * `sent` is false for an address that already had an account — no password
+       * is minted for one, and telling its owner their password had changed
+       * would be a lie in the other direction. */
+      const { invitation } = res.data
+      const who = `${email} added as ${roleLabel(role).toLowerCase()}.`
+
+      if (!invitation.sent) {
+        onDone(`${who} They already had an account, so they keep the password `
+          + 'they sign in with.')
+      } else if (invitation.delivered) {
+        onDone(`${who} A temporary password has been emailed — check the copy `
+          + 'below before passing it on.')
+      } else {
+        onDone(`${who} The email could not be sent, so pass the password below `
+          + 'on yourself.')
+      }
+
+      if (invitation.temporary_password) {
+        onCredential({
+          who: email,
+          password: invitation.temporary_password,
+          delivered: invitation.delivered,
+          reason: invitation.reason,
+        })
+      }
     } catch (err) {
       if (err instanceof ApiError && err.fields) setFields(err.fields)
       setError(err instanceof Error ? err.message : 'It could not be saved.')
