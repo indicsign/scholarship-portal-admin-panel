@@ -153,7 +153,7 @@ export default function Users() {
 
   async function act(
     u: PlatformUser,
-    what: 'suspend' | 'reinstate' | 'remove' | 'signout',
+    what: 'suspend' | 'reinstate' | 'remove' | 'signout' | 'reset',
   ) {
     const who = u.email ?? u.phone ?? 'that account'
     const wasDeactivated = u.status === 'DEACTIVATED'
@@ -166,18 +166,38 @@ export default function Users() {
         /* Sessions only, and never the password.
          *
          * This button used to call reset-password, which replaces the
-         * credential and mails the new one — and on this deployment that mail
-         * cannot be sent, because MSG91 carries only the one-time-code
+         * credential and mails the new one — and for a while that mail could
+         * not be sent at all, because MSG91 carried only the one-time-code
          * template. So every press destroyed an account: the password changed
          * and nobody was ever told the new one. It took the super admin twice
          * on 2026-09-04 before the pattern was visible.
          *
-         * Ending sessions is what the button was wanted for anyway, and it has
+         * A reset template is registered now and the button below is back, but
+         * this one stays and is still the right one nine times in ten: a shared
+         * laptop, a device somebody no longer has, a session left open. It has
          * nothing to deliver, so it cannot half-succeed. */
         await api.post(`/admin/accounts/${u.user_id}/revoke-sessions`)
         announce(
           `${who} is signed out of every session. Their password is unchanged, `
           + 'so they can sign straight back in.',
+          'ok',
+        )
+      } else if (what === 'reset') {
+        /* The larger act: a new temporary password, emailed.
+         *
+         * The server sends the mail before it writes the password, so a failure
+         * here means nothing changed and the account still signs in with what
+         * it had — which is why the error is safe to show as-is rather than
+         * hedged with "it may or may not have worked".
+         *
+         * Announced as "emailed", not "reset". What the operator needs to know
+         * is that the credential now lives in somebody else's inbox and expires,
+         * because the next question they get is "how long do I have". */
+        await api.post(`/admin/accounts/${u.user_id}/reset-password`)
+        announce(
+          `A temporary password has been emailed to ${who}. It lasts 24 hours, and `
+          + 'they will be asked to choose their own when they sign in. Every other '
+          + 'session has been signed out.',
           'ok',
         )
       } else {
@@ -381,10 +401,11 @@ export default function Users() {
                               * so the account's owner is inconvenienced by one
                               * sign-in rather than locked out.
                               *
-                              * Deliberately not "email a password". That is a
-                              * larger act — it takes the account away from
-                              * whoever holds it and depends on a mail arriving —
-                              * and it is the wrong tool for every case above.
+                              * Kept first, and kept distinct from the reset
+                              * beside it, because it is the smaller act and the
+                              * one wanted for every case above. A reset takes the
+                              * account away from whoever holds it and depends on
+                              * a mail arriving; this depends on nothing.
                               *
                               * Absent for a deactivated account, which has no
                               * sessions to end. */}
@@ -394,6 +415,41 @@ export default function Users() {
                                 <span className="sr-only">
                                   {' '}— ends every session for {u.email ?? u.phone},
                                   leaving their password unchanged
+                                </span>
+                              </button>
+                            )}
+
+                            {/* A forgotten password, and only that.
+                              *
+                              * This button was removed for a while, and the
+                              * reason is worth keeping: the mail carrying the new
+                              * password could not be sent at all, so pressing it
+                              * replaced the credential and told nobody, which is
+                              * how the platform lost its only super admin twice
+                              * in one morning. MSG91 holds a reset template now,
+                              * and the server sends before it writes — a mail
+                              * that cannot be sent leaves the password alone.
+                              *
+                              * Absent for a deactivated account: it has no
+                              * business being handed a credential, and the
+                              * service refuses it. Absent for your own row too —
+                              * the reset is delivered to the address on the
+                              * account, so resetting your own signs you out and
+                              * asks you to fetch a password out of your inbox to
+                              * get back to a screen you were already on. Account
+                              * settings is where to change your own.
+                              *
+                              * And absent without an email address, which a
+                              * student who signed up by mobile has none of. The
+                              * service refuses that case rather than setting a
+                              * password nobody can ever learn, so the button
+                              * would be a door that answers 409. */}
+                            {!dead && !isSelf && u.email && (
+                              <button className="sm" onClick={() => act(u, 'reset')}>
+                                Reset password
+                                <span className="sr-only">
+                                  {' '}— emails {u.email} a temporary password
+                                  lasting 24 hours and signs out every session
                                 </span>
                               </button>
                             )}
