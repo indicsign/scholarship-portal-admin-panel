@@ -1371,8 +1371,148 @@ dialog .foot { padding: 0.75rem 1rem; border-top: 1px solid var(--border); displ
 .login { display: grid; place-items: center; min-height: 100%; padding: 2rem 1rem; }
 .login .card { width: min(24rem, 100%); }
 .login .body { padding: 1.25rem; }
-.login h1 { font-size: 17px; margin: 0 0 0.25rem; }
-.login .lede { color: var(--text-muted); font-size: 13px; margin: 0 0 1rem; }
+/* The card's own identity, weighted up.
+ *
+ * 17px at the default weight was the same size as a table header elsewhere in
+ * the panel, which left the one screen an operator meets before they are signed
+ * in looking like a fragment of a screen rather than a front door. Bolder and a
+ * step larger, with the second line carried at 600 so it reads as a subtitle
+ * rather than as a caption that happens to sit under a heading. */
+.login h1 { font-size: 20px; font-weight: 700; margin: 0 0 0.25rem; letter-spacing: -0.01em; }
+.login .lede {
+  color: var(--text-muted); font-size: 13px; font-weight: 600;
+  margin: 0 0 1rem;
+}
+
+/* How far in, and how far to go. Two ticks beside four words.
+ *
+ * Baseline rather than centre alignment: on a narrow card the label wraps and
+ * centring would float the bars in the gap between the two lines. */
+.login .auth-progress {
+  display: flex; align-items: baseline; gap: 0.625rem;
+  margin: 0 0 0.875rem;
+  color: var(--text-muted); font-size: 12px; font-weight: 600;
+}
+.login .auth-progress .ticks { display: flex; gap: 0.25rem; flex: none; }
+.login .auth-progress .tick {
+  width: 1.5rem; height: 0.25rem;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+}
+.login .auth-progress .tick.on { background: var(--accent); border-color: var(--accent); }
+
+/* --- the six-digit code ----------------------------------------------------
+ *
+ * Six boxes, one field. Ported from the student portal so that a six-digit code
+ * looks and behaves identically in both applications — an operator who has also
+ * seen the student side should not have to learn this twice.
+ *
+ * The boxes are decoration and the control is one transparent input lying
+ * across all six. Three rules hold the illusion up: the input covers the whole
+ * group so every press lands on it, its text is transparent so only the boxes
+ * show a digit, and the caret is drawn by the box that comes next.
+ *
+ * A box is ~2.5rem wide and is not itself a target — the control behind them is
+ * the full width and height of the group, which is what WCAG 2.5.8 measures. */
+.code-boxes {
+  position: relative;
+  display: block;
+  max-width: 19rem;
+  border-radius: var(--radius);
+  /* Room for the focus ring. It is drawn on the group at outline-offset 4px,
+     and without this the hint underneath sits inside it — which reads as the
+     ring having swallowed the sentence. */
+  margin-block-end: 0.5rem;
+}
+/* flex-wrap with a floor under each box: at 200% text six boxes no longer fit
+ * the card, and given a minimum they break to two rows of three rather than
+ * shrinking until a digit will not fit inside its own box. The input is
+ * inset: 0 over the group, so it covers both rows either way. */
+.code-boxes .boxes { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; }
+.code-boxes .box {
+  flex: 1 1 0; min-width: 1.75rem; max-width: 2.5rem;
+  display: flex; align-items: center; justify-content: center;
+  height: 3rem;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 20px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+/* Progress said twice — the digit is in the box, and the box has changed — so
+ * colour is not carrying it alone. */
+.code-boxes .box.filled { border-color: var(--accent); }
+
+/* Where the next digit will go, and only while the field has focus: a caret
+ * blinking in a form nobody is typing in is a form that looks focused and is
+ * not. */
+.code-boxes:has(input:focus) .box.next {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.code-boxes:has(input:focus) .box.next::after {
+  content: '';
+  width: 2px; height: 1.5rem;
+  background: var(--accent);
+  animation: code-caret 1.06s steps(1) infinite;
+}
+/* The hidden half is the second one, so the reduced-motion rule that cuts every
+ * animation to a single pass leaves a steady bar rather than no bar at all. */
+@keyframes code-caret { 50% { opacity: 0; } }
+
+.code-boxes input {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  min-height: 0;
+  padding: 0; border: 0; border-radius: inherit;
+  background: transparent;
+  text-align: center;
+  /* Transparent, not hidden: opacity and visibility are what autofill
+   * heuristics read to decide a field is not really on the page, and the
+   * autofill of a one-time code is the point of keeping a single input.
+   * -webkit-text-fill-color as well, because Safari paints an autofilled value
+   * through that one. */
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: transparent;
+  /* Never below 16px: iOS zooms the page when a smaller field takes focus, and
+   * the boxes are then wider than the screen. */
+  font-size: 1rem;
+}
+/* Invisible text still highlights, and a select-all would otherwise drag a blue
+ * block across the boxes. */
+.code-boxes input::selection { background: transparent; }
+.code-boxes input:focus-visible { outline: none; }
+.code-boxes:has(input:focus-visible) { outline: 3px solid var(--accent); outline-offset: 4px; }
+.code-boxes:has(input[aria-invalid="true"]) .box { border-color: var(--danger); }
+
+/* Confirmation of a resend, and the two ways out of a code that never came. */
+/* Reserved height, so the row below does not jump when a resend is confirmed. */
+.login .auth-sent {
+  margin: 0.25rem 0 0; font-size: 12px; color: var(--text-muted);
+  min-height: 1.1rem;
+}
+.login .auth-retry {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
+  margin-top: 0.25rem; font-size: 12px;
+}
+
+/* A quiet action that has to line up with the card's left edge rather than with
+   the row of buttons above it: no horizontal padding, so its text starts where
+   every other line of text in the card starts. The vertical padding keeps the
+   target at 40px, matching .sm elsewhere in the panel. */
+.login .link-quiet {
+  display: inline-block;
+  margin-top: 0.125rem;
+  padding: 0.625rem 0;
+  background: none; border: 0;
+  color: var(--text-muted); font-size: 12px; font-weight: 600;
+  text-decoration: underline; text-underline-offset: 2px;
+  cursor: pointer;
+}
+.login .link-quiet:hover { color: var(--text); }
+.login .link-quiet:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
 
 /* --- misc ------------------------------------------------------------------------------------- */
 

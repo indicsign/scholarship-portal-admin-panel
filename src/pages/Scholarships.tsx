@@ -404,9 +404,26 @@ export default function Scholarships() {
  * operator find out by being refused.
  */
 type Action =
-  | 'publish' | 'pause' | 'close' | 'archive' | 'draft'
+  | 'publish' | 'pause' | 'close' | 'archive' | 'draft' | 'delete'
   // The review decisions, which used to live on a screen of their own.
   | 'approve' | 'reject' | 'request-changes'
+
+/* The status each of those actions leaves the scheme in.
+ *
+ * Written out rather than derived from the action's own name. The buttons are
+ * imperative and scholarship_status is past tense, so upper-casing the action
+ * only lands on a real status for `draft` — which is exactly why deriving it
+ * looked like it worked. See the note at the call site.
+ *
+ * Keyed on the four actions that set a status, so adding a seventh action
+ * without deciding what it sets is a type error rather than another 422.
+ */
+const STATUS_FOR: Record<'pause' | 'close' | 'archive' | 'draft', string> = {
+  pause: 'PAUSED',
+  close: 'CLOSED',
+  archive: 'ARCHIVED',
+  draft: 'DRAFT',
+}
 
 /* Whether an action refuses something, and therefore needs a reason.
  *
@@ -437,8 +454,27 @@ const ACTIONS: Record<Action, { label: string; tone: 'primary' | 'danger' | ''; 
   archive: {
     label: 'Archive',
     tone: 'danger',
-    blurb: 'The end state. There is no delete — applications name this scholarship and the '
-      + 'reference has to keep resolving.',
+    blurb: 'The end state for a scheme that ran. It stops accepting anything and leaves the '
+      + 'directory, and every application that named it still resolves.',
+  },
+  /* Deleting is for a scheme that should not exist, not for one that is over.
+   *
+   * The distinction is enforced in the database, not here: application, sanction
+   * and disbursement all reference scholarship ON DELETE RESTRICT, so a scheme
+   * anybody has applied to cannot be removed by anyone. What is left is the
+   * duplicate and the abandoned draft.
+   *
+   * This screen cannot tell which it is looking at — the queue row carries no
+   * application count — so the button is offered and the server refuses with a
+   * sentence naming how many applications stand in the way. That is a better
+   * trade than hiding it: a hidden button teaches nobody why, and the refusal
+   * arrives before anything is destroyed. */
+  delete: {
+    label: 'Delete',
+    tone: 'danger',
+    blurb: 'Removed for good, with its eligibility rules. This cannot be undone and is meant '
+      + 'for a duplicate or a scheme entered by mistake. A scheme anybody has applied to '
+      + 'cannot be deleted — archive that instead.',
   },
   draft: {
     label: 'Return to draft',
@@ -487,9 +523,9 @@ function actionsFor(state: string): Action[] {
     // but the listing is still ours to take out of the catalogue.
     case 'CHANGES_REQUESTED':
     case 'REJECTED':
-      return ['archive']
+      return ['archive', 'delete']
 
-    case 'DRAFT': return ['publish', 'archive']
+    case 'DRAFT': return ['publish', 'archive', 'delete']
     case 'PUBLISHED':
     case 'PUBLISHED_EDIT_REFUSED':
       return ['pause', 'close']
@@ -527,6 +563,9 @@ function Detail({
   onEdit: () => void
   onDone: (message: string, tone: Tone) => void
 }) {
+  // Read here rather than threaded down as a prop: the pane already decides
+  // which actions to offer, and delete's audience is one of those decisions.
+  const { can } = useAuth()
   const [pending, setPending] = useState<Action | null>(null)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
@@ -589,11 +628,24 @@ function Detail({
           pending === 'approve' ? 'ok' : 'warn',
         )
         setReason('')
+      } else if (pending === 'delete') {
+        await api.del(`/admin/scholarships/${id}`)
+        // 'danger' rather than 'ok': the row the caller was looking at is gone,
+        // and the list has to reload rather than update in place.
+        onDone(`${listing.title} was deleted.`, 'danger')
       } else if (pending === 'publish') {
         await api.post(`/admin/scholarships/${id}/publish`)
         onDone(`${listing.title} is published. Students matching it will see it.`, 'ok')
       } else {
-        const status = pending === 'draft' ? 'DRAFT' : pending.toUpperCase()
+        /* Not `pending.toUpperCase()`, which is what this was.
+         *
+         * That sent PAUSE, CLOSE and ARCHIVE to a column that only knows
+         * PAUSED, CLOSED and ARCHIVED, so pausing, closing and archiving each
+         * came back 422 from the `oneof` on the handler's body — every terminal
+         * transition on the screen, from every state. `draft` was special-cased
+         * beside it and DRAFT is both the verb and the state, so the one case
+         * that worked was the one that hid the other three. */
+        const status = STATUS_FOR[pending]
         await api.patch(`/admin/scholarships/${id}/status`, { status })
         onDone(
           `${listing.title} is now ${humanise(status).toLowerCase()}.`,
@@ -602,7 +654,11 @@ function Detail({
       }
       setPending(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'The change could not be saved.')
+      // errorDetail, not err.message: a validation failure's message is the
+      // generic "Some of the details you entered need attention." and the map
+      // beside it is the half that names one. This pane has no fields to hang
+      // the map on, so the banner is the only place it can be read.
+      setError(errorDetail(err, 'The change could not be saved.'))
     } finally {
       setBusy(false)
     }
@@ -884,7 +940,11 @@ function Detail({
               {curated && listing.status !== 'ARCHIVED' && (
                 <button onClick={onEdit}>Edit</button>
               )}
-              {actionsFor(listing.listing_state).map(a => (
+              {actionsFor(listing.listing_state)
+                // Mirrors the route, which admits SUPER_ADMIN alone. Shown to
+                // an ADMIN it would be a button that always answers 403.
+                .filter(a => a !== 'delete' || can('SUPER_ADMIN'))
+                .map(a => (
                 <button
                   key={a}
                   className={a === 'publish' ? 'primary' : ACTIONS[a].tone}
