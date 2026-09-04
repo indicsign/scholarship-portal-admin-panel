@@ -38,7 +38,7 @@
   --text-muted: #5a6472;    /*  6.0:1 */
   /* The lightest text permitted anywhere. Measured, not estimated: the
    * previous value was 4.47:1 and failed the 4.5 floor by a hair. */
-  --text-faint: #74727a;    /*  4.66:1 */
+  --text-faint: #74727a;    /*  4.74:1 */
 
   --accent: #1c4fd8;        /*  6.9:1 */
   --accent-weak: #e8eeff;
@@ -1245,7 +1245,25 @@ button.danger:disabled,
 button.subtle:disabled {
   background: var(--surface-sunken);
   border-color: var(--border);
-  color: var(--text-faint);
+  /* --text-muted, not --text-faint.
+   *
+   * --text-faint is "the lightest text permitted anywhere", and the figure
+   * that justifies it is measured against --surface (4.74:1 light). This
+   * button's ground is --surface-sunken, where the same ink is 4.23:1 — below
+   * the 4.5 floor the token is documented as clearing. 1.4.3 exempts an
+   * inactive control, so this was never a conformance failure, and that is
+   * exactly why it survived: check-contrast.py pairs --text-faint with
+   * --surface and has no case for the ground it was actually used on.
+   *
+   * The exemption is beside the point. "Save as draft" is disabled until the
+   * form is complete, which put the panel's least legible label on the one
+   * control an operator is hunting for — the report that prompted this was
+   * that the bottom of the dialog had no readable text at all. --text-muted is
+   * 5.35:1 light and 6.69:1 dark, already covered by the checker, and the
+   * button still reads as unavailable: the sunken ground, the muted ink, the
+   * not-allowed cursor and the "Still needed" sentence beside it all say so,
+   * so no single signal is carrying it. */
+  color: var(--text-muted);
 }
 
 input, select, textarea {
@@ -1341,12 +1359,46 @@ dialog {
   color: var(--text);
   padding: 0;
   width: min(34rem, calc(100vw - 2rem));
+
+  /* The head and the foot are pinned and only .body scrolls.
+   *
+   * Before this the dialog was a single scroll box and the action row was
+   * inside it, so on a long form the buttons were simply not on screen:
+   * measured on the New listing dialog at 1280x820, the foot began 272px below
+   * the fold. What an operator saw at the bottom of the panel was a cut-off
+   * field and no buttons at all, in both themes — there was nothing to tell
+   * them the form even had a Save.
+   *
+   * It also moved while being filled in. The "Still needed" sentence shortens
+   * as each requirement is met, the foot goes 77px to 55px as it rewraps, and
+   * with the body scrolled to its end the browser takes that height back out
+   * of the scroll offset — so the fields jump under the cursor on the last
+   * keystrokes. Pinning the foot means its height stops being part of the
+   * scrollable content.
+   *
+   * max-height is stated rather than inherited from the UA rule for
+   * dialog:modal, which is calc(100% - 6px - 2em) and measures the layout
+   * viewport; dvh accounts for mobile browser chrome, which that does not. */
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 2rem);
 }
 dialog::backdrop { background: rgb(0 0 0 / 0.45); }
 dialog h2 { margin: 0; font-size: 15px; }
-dialog .body { padding: 1rem; }
-dialog .head { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
-dialog .foot { padding: 0.75rem 1rem; border-top: 1px solid var(--border); display: flex; gap: 0.5rem; justify-content: flex-end; }
+/* min-height: 0 is load-bearing. A flex item's floor is its content, so
+ * without it the body refuses to shrink and the dialog grows past max-height
+ * instead of scrolling — which puts the foot back off screen. */
+dialog .body { padding: 1rem; overflow-y: auto; min-height: 0; }
+dialog .head { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); flex: none; }
+/* flex-wrap so the "Still needed" sentence drops above the buttons rather than
+ * squeezing them off the edge at 320px or at 200% zoom. */
+dialog .foot {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  display: flex; flex-wrap: wrap; gap: 0.5rem;
+  justify-content: flex-end; align-items: center;
+  flex: none;
+}
 
 /* --- states ----------------------------------------------------------------------------- */
 
