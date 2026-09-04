@@ -12,7 +12,6 @@ export type Role =
   | 'STAFF'
   | 'COMPLIANCE'
   | 'STUDENT'
-  | 'GUARDIAN'
   // One role per kind of organisation. There were nine — an admin, a verifier
   // and a finance or case-working role for each type — and the difference
   // between them was a separation of duties the platform no longer keeps.
@@ -516,6 +515,7 @@ export interface CatalogueCounts {
   paused: number
   closed: number
   archived: number
+  binned: number
   curated: number
   duplicates: number
   /* Waiting on a platform decision: submitted for the first time, or live with

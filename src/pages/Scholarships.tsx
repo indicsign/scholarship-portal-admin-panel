@@ -61,6 +61,10 @@ const STATUSES: { key: string; label: string; of: (c: Catalogue['counts']) => nu
   { key: 'PAUSED', label: 'Paused', of: c => c.paused },
   { key: 'CLOSED', label: 'Closed', of: c => c.closed },
   { key: 'ARCHIVED', label: 'Archived', of: c => c.archived },
+  /* Last, and deliberately after Archived. The order is the life of a
+     scheme, and the bin is where one goes when it should not have had a
+     life at all — a duplicate, or one entered by mistake. */
+  { key: 'BIN', label: 'Bin', of: c => c.binned },
 ]
 
 /* How each derived state is worded and coloured here.
@@ -80,6 +84,7 @@ const STATE_LABEL: Record<string, string> = {
   PAUSED: 'Paused',
   CLOSED: 'Closed',
   ARCHIVED: 'Archived',
+  BIN: 'In the bin',
 }
 
 const STATE_TONE: Record<string, 'neutral' | 'ok' | 'warn' | 'danger' | 'accent'> = {
@@ -93,6 +98,9 @@ const STATE_TONE: Record<string, 'neutral' | 'ok' | 'warn' | 'danger' | 'accent'
   PAUSED: 'warn',
   CLOSED: 'neutral',
   ARCHIVED: 'neutral',
+  // Not 'danger'. Nothing is wrong with a binned scheme — it is waiting to
+  // be deleted, and red here would read as an error needing attention.
+  BIN: 'warn',
 }
 
 /* Not humanise(): it passes any all-caps word of five letters or fewer through
@@ -404,7 +412,8 @@ export default function Scholarships() {
  * operator find out by being refused.
  */
 type Action =
-  | 'publish' | 'pause' | 'close' | 'archive' | 'draft' | 'delete'
+  | 'publish' | 'pause' | 'close' | 'archive' | 'draft'
+  | 'bin' | 'restore' | 'delete'
   // The review decisions, which used to live on a screen of their own.
   | 'approve' | 'reject' | 'request-changes'
 
@@ -418,11 +427,22 @@ type Action =
  * Keyed on the four actions that set a status, so adding a seventh action
  * without deciding what it sets is a type error rather than another 422.
  */
-const STATUS_FOR: Record<'pause' | 'close' | 'archive' | 'draft', string> = {
+const STATUS_FOR: Record<
+  'pause' | 'close' | 'archive' | 'draft' | 'bin' | 'restore', string
+> = {
   pause: 'PAUSED',
   close: 'CLOSED',
   archive: 'ARCHIVED',
   draft: 'DRAFT',
+  bin: 'BIN',
+  /* Restoring returns a scheme to DRAFT, not to whatever it was before.
+   *
+   * Nothing records the state it was binned from, and inventing one would
+   * be worse than not having it: restoring straight to PUBLISHED would put
+   * a scheme back in the public directory and into every student's matches
+   * as a side effect of undoing a mistake. DRAFT is visible to nobody, so
+   * the operator republishes deliberately or not at all. */
+  restore: 'DRAFT',
 }
 
 /* Whether an action refuses something, and therefore needs a reason.
@@ -469,12 +489,25 @@ const ACTIONS: Record<Action, { label: string; tone: 'primary' | 'danger' | ''; 
    * sentence naming how many applications stand in the way. That is a better
    * trade than hiding it: a hidden button teaches nobody why, and the refusal
    * arrives before anything is destroyed. */
+  bin: {
+    label: 'Move to bin',
+    tone: '',
+    blurb: 'It leaves the catalogue and stops matching, and nothing is destroyed. '
+      + 'Use it for a duplicate or a scheme entered by mistake — the bin is where '
+      + 'those wait, so that Archived stays a list of schemes that actually ran.',
+  },
+  restore: {
+    label: 'Restore',
+    tone: '',
+    blurb: 'It comes back as a draft, visible to nobody, so republishing stays a '
+      + 'decision you make rather than a side effect of undoing a mistake.',
+  },
   delete: {
-    label: 'Delete',
+    label: 'Delete permanently',
     tone: 'danger',
-    blurb: 'Removed for good, with its eligibility rules. This cannot be undone and is meant '
-      + 'for a duplicate or a scheme entered by mistake. A scheme anybody has applied to '
-      + 'cannot be deleted — archive that instead.',
+    blurb: 'The row, its eligibility rules and its stored logo are removed for good. '
+      + 'This cannot be undone. A scheme anybody has applied to cannot be deleted at '
+      + 'all — the database refuses it, and archiving is the answer for one that ran.',
   },
   draft: {
     label: 'Return to draft',
@@ -523,14 +556,29 @@ function actionsFor(state: string): Action[] {
     // but the listing is still ours to take out of the catalogue.
     case 'CHANGES_REQUESTED':
     case 'REJECTED':
-      return ['archive', 'delete']
+      return ['archive', 'bin']
 
-    case 'DRAFT': return ['publish', 'archive', 'delete']
+    case 'DRAFT': return ['publish', 'archive', 'bin']
     case 'PUBLISHED':
     case 'PUBLISHED_EDIT_REFUSED':
       return ['pause', 'close']
     case 'PAUSED': return ['publish', 'draft', 'close']
-    case 'CLOSED': return ['archive']
+    case 'CLOSED': return ['archive', 'bin']
+
+    /* Archived is an outcome and the bin is not, so a scheme can still be
+       binned from here — that is how a mistake filed as history gets out of a
+       list it does not belong in. */
+    case 'ARCHIVED': return ['bin']
+
+    /* The only place Delete is offered, and the only place it makes sense.
+     *
+     * It used to sit beside Archive on DRAFT and on the refused states, which
+     * put an irreversible action one click from a routine one. Binning first
+     * makes deletion a second, deliberate decision on a screen the operator had
+     * to navigate to — and the bin is reversible, which is what makes that
+     * safe rather than merely slower. */
+    case 'BIN': return ['restore', 'delete']
+
     default: return []
   }
 }
@@ -647,9 +695,24 @@ function Detail({
          * that worked was the one that hid the other three. */
         const status = STATUS_FOR[pending]
         await api.patch(`/admin/scholarships/${id}/status`, { status })
+
+        /* Worded per action, not derived from the status.
+         *
+         * humanise() passes any all-caps word of five letters or fewer through
+         * as an acronym, so the generic sentence rendered "is now bin." And a
+         * restore lands on DRAFT, which is true and tells the operator nothing
+         * about what they just did. */
         onDone(
-          `${listing.title} is now ${humanise(status).toLowerCase()}.`,
-          pending === 'pause' || pending === 'draft' ? 'warn' : 'danger',
+          pending === 'bin'
+            ? `${listing.title} is in the bin. Nothing has been deleted.`
+            : pending === 'restore'
+              ? `${listing.title} is restored, as a draft. Publish it when you are ready.`
+              : `${listing.title} is now ${humanise(status).toLowerCase()}.`,
+          pending === 'restore'
+            ? 'ok'
+            : pending === 'pause' || pending === 'draft' || pending === 'bin'
+              ? 'warn'
+              : 'danger',
         )
       }
       setPending(null)
